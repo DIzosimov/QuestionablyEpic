@@ -13,8 +13,10 @@ import MiniItemCard from "./MiniItemCard";
 import { useHistory } from "react-router-dom";
 import HelpText from "../SetupAndMenus/HelpText";
 import { CONSTRAINTS } from "../../Engine/CONSTRAINTS";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import ItemBar from "../ItemBar/ItemBar";
+import GearOptionsSelector from "./GearOptionsSelector";
+import { togglePlayerSettings } from "Redux/Actions";
 import CharacterPanel from "../CharacterPanel/CharacterPanel";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTranslatedSlotName } from "locale/slotsLocale";
@@ -170,6 +172,14 @@ export default function TopGear(props: any) {
   const [openDelete, setOpenDelete] = useState(false);
 
   const [activeSlot, setSlot] = useState("");
+
+  // Gem / enchant / Folio selection writes straight into playerSettings, the same store the engine reads from.
+  const settingsDispatch = useDispatch();
+  const updateGearOption = (key: string, value: any) => {
+    const updated: any = { ...playerSettings };
+    if (updated[key]) updated[key] = { ...updated[key], value: value };
+    settingsDispatch(togglePlayerSettings(updated));
+  };
   /* ------------ itemList isn't used for anything here other than to trigger rerenders ----------- */
   const [itemList, setItemList] = useState(props.player.getActiveItems(activeSlot));
   const [btnActive, setBtnActive] = useState<boolean>(true);
@@ -796,6 +806,12 @@ export default function TopGear(props: any) {
         <Grid item xs={12}>
           <ItemBar player={props.player} setItemList={setItemList} />
         </Grid>
+
+        {gameType === "Retail" ? (
+          <Grid item xs={12}>
+            <GearOptionsSelector playerSettings={playerSettings} updateSetting={updateGearOption} spec={props.player.spec} />
+          </Grid>
+        ) : null}
         {gameType === "Classic" && getSetting(playerSettings, "reforgeSetting") === "Manual"? 
         <Grid item xs={12}>
           <TopGearReforgePanel changeReforgeFrom={changeReforgeFrom} changeReforgeTo={changeReforgeTo} reforgeFrom={reforgeFromList} reforgeTo={reforgeToList} />

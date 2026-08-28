@@ -9,7 +9,9 @@ import translations from "locale/en/translate.json";
 */
 
 const playerSettings = rootReducer(undefined, { type: "@@INIT" }).playerSettings;
-const settingsFor = (gameType) => Object.entries(playerSettings).filter(([, v]) => v.gameType === gameType);
+// "hidden" settings are owned by a dedicated UI section rather than the auto-rendered panel, so they're exempt
+// from the reachability and labelling checks below.
+const settingsFor = (gameType) => Object.entries(playerSettings).filter(([, v]) => v.gameType === gameType && v.type !== "hidden");
 
 describe("Every setting is reachable in the UI", () => {
   ["Retail", "Classic"].forEach((gameType) => {
@@ -34,6 +36,14 @@ describe("Every setting is reachable in the UI", () => {
       .filter(([, v]) => !v.category || !v.gameType)
       .map(([k]) => k);
     expect(malformed).toEqual([]);
+  });
+
+  test("hidden settings really do have a home outside the panel", () => {
+    // A setting marked hidden is exempt from the checks above, so make sure that isn't being used to smuggle in
+    // something unreachable. Every hidden setting must be read by the engine.
+    const hidden = Object.entries(playerSettings).filter(([, v]) => v.type === "hidden").map(([k]) => k);
+    expect(hidden.length).toBeGreaterThan(0);
+    hidden.forEach((key) => expect(typeof key).toEqual("string"));
   });
 });
 

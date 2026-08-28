@@ -1,0 +1,78 @@
+/* ---------------------------------------------------------------------------------------------- */
+/*                                          Enchant DB                                            */
+/* ---------------------------------------------------------------------------------------------- */
+// Every enchant the app models, extracted from the values that were previously inlined in
+// TopGearEngine.enchantItems. This is now the single source of truth: the engine applies from here, and the
+// selection UI offers from here, so the two can't drift apart the way the embellishment lists did.
+//
+// `stats` are flat additions. `procStats` are applied at the enchant's uptime rather than in full, which is how
+// the weapon enchants behave. `manaPerc` is multiplicative.
+
+export type EnchantEntry = {
+  id: string; // stable key, used as the setting value
+  name: string;
+  slots: string[]; // which item slots this enchant can go on
+  stats?: { [key: string]: number };
+  procStats?: { [key: string]: number }; // scaled by the enchant's proc uptime
+  manaPerc?: number;
+  specRestriction?: string[]; // only offered / defaulted for these specs
+  isDefaultFor?: string[]; // specs this is the automatic pick for
+};
+
+// Weapon enchants proc, and the engine has always valued them at 3 PPM over a 15s window.
+export const WEAPON_ENCHANT_PPM = 3;
+export const WEAPON_ENCHANT_DURATION = 15;
+
+export const enchantDB: EnchantEntry[] = [
+  /* ------------------------------------------- Rings ------------------------------------------- */
+  // All ring enchants grant the same amount; the only difference is which stat.
+  { id: "Silvermoon's Alacrity", name: "Silvermoon's Alacrity", slots: ["Finger"], stats: { haste: 29 } },
+  { id: "Nature's Fury", name: "Nature's Fury", slots: ["Finger"], stats: { crit: 29 } },
+  { id: "Zul'jin's Mastery", name: "Zul'jin's Mastery", slots: ["Finger"], stats: { mastery: 29 } },
+  { id: "Silvermoon's Tenacity", name: "Silvermoon's Tenacity", slots: ["Finger"], stats: { versatility: 29 } },
+  // Eyes of the Eagle is the name these two specs see. It grants the same budget, applied to their best stat,
+  // which is why it has no fixed stat of its own.
+  { id: "Eyes of the Eagle", name: "Eyes of the Eagle", slots: ["Finger"],
+    specRestriction: ["Holy Priest", "Restoration Shaman"], isDefaultFor: ["Holy Priest", "Restoration Shaman"] },
+
+  /* -------------------------------------------- Head ------------------------------------------- */
+  { id: "Empowered Hex of Leeching", name: "Empowered Hex of Leeching", slots: ["Head"], stats: { leech: 55 } },
+
+  /* ------------------------------------------- Chest ------------------------------------------- */
+  { id: "Mark of the Worldsoul", name: "Mark of the Worldsoul", slots: ["Chest"], stats: { intellect: 50 } },
+  { id: "Mark of the Magister", name: "Mark of the Magister", slots: ["Chest"], stats: { intellect: 40 }, manaPerc: 1.05,
+    isDefaultFor: ["Restoration Shaman"] },
+
+  /* ----------------------------------------- Shoulder ------------------------------------------ */
+  { id: "Silvermoon's Mending", name: "Silvermoon's Mending", slots: ["Shoulder"], stats: { leech: 166 } },
+
+  /* -------------------------------------------- Legs ------------------------------------------- */
+  { id: "Arcanoweave Spellthread", name: "Arcanoweave Spellthread", slots: ["Legs"], stats: { intellect: 41 }, manaPerc: 1.04 },
+
+  /* -------------------------------------------- Feet ------------------------------------------- */
+  { id: "Shaladrassil's Roots", name: "Shaladrassil's Roots", slots: ["Feet"], stats: { leech: 28 } },
+
+  /* ------------------------------------------ Weapon ------------------------------------------- */
+  { id: "Acuity of the Ren'dorei", name: "Acuity of the Ren'dorei", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+    procStats: { intellect: 67 } },
+  { id: "Berserker's Rage", name: "Berserker's Rage", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+    procStats: { haste: 124 }, isDefaultFor: ["Discipline Priest", "Restoration Druid"] },
+  { id: "Arcane Mastery", name: "Arcane Mastery", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+    procStats: { mastery: 124 }, isDefaultFor: ["Preservation Evoker"] },
+];
+
+/** Every enchant legal on a slot, filtered to the ones this spec can use. */
+export const getEnchantsForSlot = (slot: string, spec: string): EnchantEntry[] =>
+  enchantDB.filter((e) => e.slots.includes(slot) && (!e.specRestriction || e.specRestriction.includes(spec)));
+
+/** The enchant the engine picks automatically for a slot, or undefined when the choice is stat-driven. */
+export const getDefaultEnchant = (slot: string, spec: string): EnchantEntry | undefined => {
+  const candidates = getEnchantsForSlot(slot, spec);
+  return candidates.find((e) => e.isDefaultFor && e.isDefaultFor.includes(spec)) ||
+         candidates.find((e) => !e.isDefaultFor && !e.specRestriction);
+};
+
+export const getEnchantById = (id: string): EnchantEntry | undefined => enchantDB.find((e) => e.id === id);
+
+/** Slots the player can choose an enchant for, in the order they're shown. */
+export const ENCHANTABLE_SLOTS = ["Head", "Shoulder", "Chest", "Legs", "Feet", "Finger", "CombinedWeapon"];

@@ -17,7 +17,8 @@ import { getCircletEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffe
 import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngineShared"
 import Item from "General/Items/Item";
 import { gemDB } from "Databases/GemDB";
-import { getFolioEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
+import { getFolioEffect, getFolioGems } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
  * == Top Gear Engine ==
@@ -157,6 +158,50 @@ function getMidnightGemOptions(spec: string, contentType: contentTypes, settings
     return [getGemID('haste', 'crit')]
   }
 
+}
+
+/**
+ * Works out which gems a set is actually wearing.
+ *
+ * Top Gear has always ignored the player's socketed gems and assigned its own to every socket, which quietly
+ * assumes they'll re-gem the whole set. `replaceExistingGems` makes that explicit:
+ *   - true  : every socket gets the chosen (or automatic) gem, as before.
+ *   - false : sockets that already hold a gem keep it, and only empty ones are filled.
+ *
+ * Equipped gems come from the SimC import, which stores them on the item as a colon separated gemString.
+ */
+function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes, userSettings: any): number[] {
+  const sockets = Math.max(0, builtSet.setSockets);
+  if (sockets === 0) return [];
+
+  // The gem the player picked for the filler sockets, falling back to the engine's automatic choice.
+  const chosenId = getSetting(userSettings, "selectedGem");
+  const automatic = getMidnightGemOptions(player.spec, contentType, userSettings);
+  const filler = typeof chosenId === "number" && chosenId > 0 ? chosenId : null;
+
+  // Meta is socket 0 and is chosen separately, since it is not interchangeable with the stat gems.
+  const chosenMeta = getSetting(userSettings, "selectedMetaGem");
+  const metaId = typeof chosenMeta === "number" && chosenMeta > 0 ? chosenMeta : automatic[0];
+
+  const buildAutomatic = () => {
+    const gems = automatic.slice(0, sockets);
+    if (gems.length > 0) gems[0] = metaId;
+    for (let i = 1; i < gems.length; i++) if (filler) gems[i] = filler;
+    return gems;
+  };
+
+  if (getSetting(userSettings, "replaceExistingGems") !== false) return buildAutomatic();
+
+  // Fill-empty mode: keep what's already socketed, top up the rest.
+  const equipped: number[] = [];
+  (builtSet.itemList || []).forEach((item: any) => {
+    if (!item.socket) return;
+    const onItem = (item.gemString || "").split(":").filter((g: string) => g !== "").map((g: string) => parseInt(g, 10));
+    for (let i = 0; i < item.socket; i++) equipped.push(onItem[i] && gemDB.some((g) => g.id === onItem[i]) ? onItem[i] : 0);
+  });
+
+  const fallback = buildAutomatic();
+  return fallback.map((auto: number, i: number) => (equipped[i] ? equipped[i] : auto));
 }
 
 function getGemStats(gemArray: number[]) {
@@ -594,72 +639,81 @@ function sumScore(obj: any) {
   return sum;
 }
 
-function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string) {
+// Reads the player's per-slot enchant choice. Anything unset or unrecognised falls back to Automatic, which is
+// the pick the engine made before any of this was selectable.
+function getChosenEnchant(userSettings: any, slot: string, spec: string) {
+  const choices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
+  const chosenId = choices && typeof choices === "object" ? choices[slot] : null;
+  const chosen = chosenId && chosenId !== "Automatic" ? getEnchantById(chosenId) : undefined;
+
+  // A choice that isn't legal on this slot (stale selection after a patch) is ignored rather than dropping the
+  // enchant entirely, which would silently cost the player stats.
+  if (chosen && chosen.slots.includes(slot)) return chosen;
+  return getDefaultEnchant(slot, spec);
+}
+
+// Applies one enchant's stats. Proc enchants are valued at their uptime, which is how the weapon enchants have
+// always been handled. An enchant with no stats of its own (Eyes of the Eagle) grants its budget to the player's
+// best stat instead.
+function applyEnchant(bonus_stats: Stats, enchant: any, highestWeight: string) {
+  if (!enchant) return;
+
+  if (enchant.stats) {
+    Object.keys(enchant.stats).forEach((stat) => {
+      bonus_stats[stat as keyof Stats] = (bonus_stats[stat as keyof Stats] || 0) + enchant.stats[stat];
+    });
+  }
+  if (enchant.procStats) {
+    const uptime = convertPPMToUptime(WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION);
+    Object.keys(enchant.procStats).forEach((stat) => {
+      bonus_stats[stat as keyof Stats] = (bonus_stats[stat as keyof Stats] || 0) + enchant.procStats[stat] * uptime;
+    });
+  }
+  if (enchant.manaPerc) bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * enchant.manaPerc;
+
+  // Eyes of the Eagle carries no stat of its own - it grants the standard ring budget to the best stat.
+  if (!enchant.stats && !enchant.procStats && enchant.slots.includes("Finger")) {
+    bonus_stats[highestWeight as keyof Stats] = (bonus_stats[highestWeight as keyof Stats] || 0) + 29;
+  }
+}
+
+function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string, userSettings: any = {}) {
   let enchants: {[key: string]: string | number | number[]} = {}; // TODO: Cleanup
-  // Rings - Best secondary.
-  // We use the players highest stat weight here. Using an adjusted weight could be more accurate, but the difference is likely to be the smallest fraction of a
-  // single percentage. The stress this could cause a player is likely not worth the optimization.
-  let highestWeight = getHighestWeight(castModel);
 
-  bonus_stats[highestWeight as keyof typeof bonus_stats] = (bonus_stats[highestWeight as keyof typeof bonus_stats] || 0) +  29; // 64 x 2.
-  let ringEnchantName = "";
+  // Rings. Every ring enchant grants the same amount, so Automatic picks the one matching the player's best stat.
+  // We use the highest stat weight rather than an adjusted weight - the difference is a fraction of a percent and
+  // isn't worth the extra churn in what the player is told to enchant.
+  const highestWeight = getHighestWeight(castModel);
 
-  if (spec === "Holy Priest" || spec === "Restoration Shaman") ringEnchantName = "Eyes of the Eagle";
-  else if (highestWeight === "haste") ringEnchantName = "Silvermoon's Alacrity";
-  else if (highestWeight === "crit") ringEnchantName = "Nature's Fury";
-  else if (highestWeight === "mastery") ringEnchantName = "Zul'jin's Mastery";
-  else if (highestWeight === "versatility") ringEnchantName = "Silvermoon's Tenacity";
-  enchants["Finger"] = ringEnchantName;
-
-
-  // Helm
-  bonus_stats.leech = (bonus_stats.leech || 0) + 55;
-  enchants["Head"] = "Empowered Hex of Leeching";
-
-  // Chest
-  // There is a mana option too that we might include later.
-  if (spec === "Restoration Shaman") {
-    bonus_stats.intellect = (bonus_stats.intellect || 0) + 40;
-    bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * 1.05; 
-    enchants["Chest"] = "Mark of the Magister";
+  const ringChoices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
+  const ringChoiceId = ringChoices && typeof ringChoices === "object" ? ringChoices["Finger"] : null;
+  let ringEnchant = ringChoiceId && ringChoiceId !== "Automatic" ? getEnchantById(ringChoiceId) : undefined;
+  if (!ringEnchant || !ringEnchant.slots.includes("Finger")) {
+    // Automatic: Eyes of the Eagle where the spec uses it, otherwise the enchant matching their best stat.
+    ringEnchant = getDefaultEnchant("Finger", spec) ||
+      getEnchantsForSlot("Finger", spec).find((e) => e.stats && highestWeight in e.stats);
+    if (spec !== "Holy Priest" && spec !== "Restoration Shaman") {
+      ringEnchant = getEnchantsForSlot("Finger", spec).find((e) => e.stats && highestWeight in e.stats) || ringEnchant;
+    }
   }
-  else {
-    bonus_stats.intellect = (bonus_stats.intellect || 0) + 50; 
-    enchants["Chest"] = "Mark of the Worldsoul";
-  }
+  applyEnchant(bonus_stats, ringEnchant, highestWeight);
+  enchants["Finger"] = ringEnchant ? ringEnchant.name : "";
 
+  // Armour slots. One entry each today, but they read from the DB so adding options is a data change.
+  ["Head", "Chest", "Shoulder", "Legs", "Feet"].forEach((slot) => {
+    const enchant = getChosenEnchant(userSettings, slot, spec);
+    applyEnchant(bonus_stats, enchant, highestWeight);
+    enchants[slot] = enchant ? enchant.name : "";
+  });
 
-  // Shoulders
-  bonus_stats.leech = (bonus_stats.leech || 0) + 166;
-  enchants["Shoulder"] = "Silvermoon's Mending";
-
-  // Legs - Also gives 3/4/5% mana.
-  bonus_stats.intellect += 41;
-  bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * 1.04;
-  enchants["Legs"] = "Arcanoweave Spellthread";
-
-  // Boots
-  bonus_stats.leech = (bonus_stats.leech || 0) + 28;
-  enchants["Feet"] = "Shaladrassil's Roots";
-
-
-  // Weapon - Acuity of the Ren'dorei. Should add a setting for secondary enchants too.
-  let wepEnchantName = "Acuity of the Ren'dorei"
-  if (spec === "Discipline Priest" || spec === "Restoration Druid") {
-    wepEnchantName = "Berserker's Rage";
-    bonus_stats.haste = (bonus_stats.mastery || 0) + 124 * convertPPMToUptime(3, 15);
-  }
-  else if (spec === "Preservation Evoker") {
-    wepEnchantName = "Arcane Mastery";
-    bonus_stats.mastery = (bonus_stats.mastery || 0) + 124 * convertPPMToUptime(3, 15);
-  }
-  else {
-    bonus_stats.intellect += 67 * convertPPMToUptime(3, 15);
-  }
-  
-  enchants["CombinedWeapon"] = wepEnchantName; 
-  enchants["2H Weapon"] = wepEnchantName; 
-  enchants["1H Weapon"] = wepEnchantName; 
+  // Weapon. Automatic keeps the per-spec default; the secondary enchants are budgeted higher than the intellect
+  // one, so this is a real choice rather than a cosmetic one.
+  const weaponEnchant = getChosenEnchant(userSettings, "CombinedWeapon", spec);
+  applyEnchant(bonus_stats, weaponEnchant, highestWeight);
+  const wepEnchantName = weaponEnchant ? weaponEnchant.name : "";
+  enchants["CombinedWeapon"] = wepEnchantName;
+  enchants["2H Weapon"] = wepEnchantName;
+  enchants["1H Weapon"] = wepEnchantName;
 
   return enchants;
 }
@@ -776,7 +830,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
 
 
   // == Enchants and gems ==
-  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec);
+  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec, userSettings);
   compileStats(bonus_stats, enchantStats);
   statBreakdown.enchants = enchantStats;
   
@@ -838,7 +892,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
     
   }
   else {
-    enchants["Gems"] = getMidnightGemOptions(player.spec, contentType, userSettings).slice(0, Math.max(0, builtSet.setSockets));
+    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings);
     const gemStats = getGemStats(enchants["Gems"]);
     statBreakdown.gems = gemStats;
 
@@ -911,25 +965,9 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   }
 
 
-  // Omnium Folio
-  // Handle user entry / unlocks later.
-  const folioGems = [1279599, 1279603, 1287555]
-  const bestStat = getHighestWeight(castModel);
-  switch (bestStat) {
-    case "haste":
-      folioGems.push(1287774);
-      break;
-    case "crit":
-      folioGems.push(1279609);
-      break;
-    case "mastery":
-      folioGems.push(1287771);
-      break;
-    case "versatility":
-      folioGems.push(1279613);
-      break;
-  }
-  folioGems.push(1279614)
+  // Omnium Folio. Slots 1, 4 and 5 are selectable; anything left on Automatic resolves to the rune the engine
+  // used to hardcode, so an untouched profile produces an identical set.
+  const folioGems = getFolioGems(userSettings, getHighestWeight(castModel));
 
 
   const folioStats = getFolioEffect(folioGems, {player: player, contentType: contentType, settings: userSettings, setStats: setStats, castModel: castModel, setVariables: setVariables});

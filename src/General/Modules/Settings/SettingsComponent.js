@@ -66,7 +66,9 @@ export default function SettingsComponent(props) {
       }
 
       // Push the current key into the array corresponding to its category in the result object
-      if (data[key].gameType === gameType && (data[key].spec === undefined || data[key].spec === spec)) result[category].push(key);
+      // "hidden" settings are driven by their own dedicated UI (gem / enchant / Folio selection sits with item
+      // selection, not here), so the auto-rendered panel skips them.
+      if (data[key].type !== "hidden" && data[key].gameType === gameType && (data[key].spec === undefined || data[key].spec === spec)) result[category].push(key);
       
     }
 

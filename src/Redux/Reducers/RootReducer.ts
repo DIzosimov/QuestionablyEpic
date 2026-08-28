@@ -54,6 +54,16 @@ const initialState : RootState = {
     //runeChoice: {value: "Automatic", options: ["Automatic", "Haste", "Crit", "Mastery"], category: "topGear", type: "selector", gameType: "Retail"},
     flaskChoice: {value: "Automatic", options: ["Automatic", "Crit", "Mastery", "Versatility", "Haste"], category: "topGear", type: "selector", gameType: "Retail"},
 
+    // Gems, enchants and Folio runes. 0 / "Automatic" means "let the engine pick", which is what it did before
+    // any of this was selectable, so an untouched profile produces identical results.
+    selectedGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
+    selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
+    replaceExistingGems: {value: true, options: [true, false], category: "gems", type: "hidden", gameType: "Retail"},
+    enchantChoices: {value: {}, options: [], category: "enchants", type: "hidden", gameType: "Retail"},
+    folioSlot1: {value: "Automatic", options: ["Automatic", "Unleashed Fire", "Void-Touched"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
+    folioSlot4: {value: "Automatic", options: ["Automatic", "Haste", "Crit", "Mastery", "Vers"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
+    folioSlot5: {value: "Automatic", options: ["Automatic", "Overload", "Residual Energy", "Echoes"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
+
     // Consumables. Only options with real modelled values are offered - see the consumables block in TopGearEngine.
     foodBuff: {value: "Intellect Food", options: ["Intellect Food", "None"], category: "consumables", type: "selector", gameType: "Retail"},
     weaponOil: {value: true, options: [true, false], category: "consumables", type: "selector", gameType: "Retail"},
