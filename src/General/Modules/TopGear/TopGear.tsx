@@ -38,6 +38,7 @@ type ShortReport = {
   differentials: any[]; // TODO: Replace with Differentials.
   contentType: string; // TODO: Replace with contentTypes
   embellishedSelected?: number; // Drives the "only two embellishments can be worn" note in the report.
+  equippedHPS?: number; // Throughput of the player's current gear, for the upgrade percentage.
   itemSet: {
     itemList: any[]; // TODO: Replace with Item
     setStats: any; // TODO: Replace with nice stat object.
@@ -439,6 +440,7 @@ export default function TopGear(props: any) {
         new: false,
         contentType: report.contentType,
         embellishedSelected: report.embellishedSelected,
+        equippedHPS: report.equippedHPS,
         effectList: report.itemSet.effectList, 
         
        
@@ -453,6 +455,7 @@ export default function TopGear(props: any) {
                   folioGems: report.itemSet.folioGems || [],
                   firstSocket: report.itemSet.firstSocket,
                   hardScore: report.itemSet.hardScore,
+                  setHPS: report.itemSet.setHPS,
                   statBreakdown: report.itemSet.statBreakdown,
                 },
         player: {name: player.charName, realm: player.realm, race: player.race || "", region: player.region, spec: player.spec, model: player.getActiveModel(report.contentType).modelName},
