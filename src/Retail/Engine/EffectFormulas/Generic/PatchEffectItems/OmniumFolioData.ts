@@ -1,7 +1,7 @@
 import { convertPPMToUptime, processedValue, runGenericPPMTrinket, 
     getHighestStat, getLowestStat, runGenericOnUseTrinket, getDiminishedValue, runDiscOnUseTrinket, runGenericFlatProc } from "Retail/Engine/EffectFormulas/EffectUtilities";
     
-import { compileStats, getEstimatedHPS } from "General/Engine/ItemUtilities"
+import { compileStats, getEstimatedHPS, getGearOption } from "General/Engine/ItemUtilities"
 
 import Player from "General/Modules/Player/Player";
 
@@ -72,7 +72,8 @@ export const getFolioGems = (settings: any, bestStat: string): number[] => {
 
   [1, 2, 3, 4, 5].forEach((slot) => {
     const settingKey = FOLIO_SLOT_SETTINGS[slot];
-    const raw = settingKey && settings && settingKey in settings ? settings[settingKey].value : "Automatic";
+    // Reads as Automatic while the detailed gear options toggle is off, so the runes are the engine's own pick.
+    const raw = settingKey ? getGearOption(settings, settingKey, "Automatic") : "Automatic";
     const choice = typeof raw === "string" ? raw : "Automatic";
 
     if (choice !== "Automatic") {

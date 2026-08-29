@@ -6,7 +6,7 @@ import { convertPPMToUptime, getSetting, getDiminishedValue } from "../../../../
 import Player from "../../Player/Player";
 import CastModel from "../../Player/CastModel";
 import { getEffectValue } from "../../../../Retail/Engine/EffectFormulas/EffectEngine";
-import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished } from "General/Engine/ItemUtilities";
+import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished, getGearOption } from "General/Engine/ItemUtilities";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTrinketValue } from "Retail/Engine/EffectFormulas/Generic/Trinkets/TrinketEffectFormulas";
 import { allRamps, allRampsHealing, getDefaultDiscTalents } from "General/Modules/Player/ClassDefaults/DisciplinePriest/DiscRampUtilities";
@@ -176,13 +176,13 @@ function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes
 
   // When several gems are selected the caller hands us one specific loadout to evaluate; otherwise fall back to
   // the single selected gem, and failing that the engine's automatic choice.
-  const selected = getSetting(userSettings, "selectedGems");
+  const selected = getGearOption(userSettings, "selectedGems", []);
   const singleSelection = Array.isArray(selected) && selected.length === 1 && selected[0] > 0 ? selected[0] : null;
   const automatic = getMidnightGemOptions(player.spec, contentType, userSettings);
   const filler = singleSelection;
 
   // Meta is socket 0 and is chosen separately, since it is not interchangeable with the stat gems.
-  const chosenMeta = getSetting(userSettings, "selectedMetaGem");
+  const chosenMeta = getGearOption(userSettings, "selectedMetaGem", 0);
   const metaId = typeof chosenMeta === "number" && chosenMeta > 0 ? chosenMeta : automatic[0];
 
   const buildAutomatic = () => {
@@ -196,7 +196,7 @@ function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes
     return gems;
   };
 
-  if (getSetting(userSettings, "replaceExistingGems") !== false) return buildAutomatic();
+  if (getGearOption(userSettings, "replaceExistingGems", true) !== false) return buildAutomatic();
 
   // Fill-empty mode: keep what's already socketed, top up the rest.
   const equipped: number[] = [];
@@ -404,7 +404,7 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // Selecting several gems expands each set into one candidate per gem loadout, which are then ranked together -
   // the same way selecting two rings gives you two candidate sets. Selecting one (or none) leaves this at a
   // single evaluation per set, exactly as before.
-  const selectedGemsSetting = getSetting(userSettings, "selectedGems");
+  const selectedGemsSetting = getGearOption(userSettings, "selectedGems", []);
   const selectedGems: number[] = Array.isArray(selectedGemsSetting) ? selectedGemsSetting.filter((g: number) => g > 0) : [];
 
   // Sockets are only known per set, but they're bounded, so build loadouts against the largest set and let each
@@ -414,7 +414,7 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
 
   // Enchants can be multi-selected per slot too. Gems and enchants are expanded together into a single list of
   // variants, each of which is a complete, wearable configuration ranked alongside every other set.
-  const enchantChoiceSetting = getSetting(userSettings, "enchantChoices");
+  const enchantChoiceSetting = getGearOption(userSettings, "enchantChoices", {});
   const enchantCombos = buildEnchantCombinations(enchantChoiceSetting);
   const variants = buildSetVariants(gemLoadouts, enchantCombos.length > 1 ? enchantCombos : []);
 
@@ -741,7 +741,7 @@ function sumScore(obj: any) {
 function getChosenEnchantId(userSettings: any, slot: string, enchantOverride?: any) {
   let chosenId: string | null = enchantOverride && enchantOverride[slot] ? enchantOverride[slot] : null;
   if (!chosenId) {
-    const choices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
+    const choices = getGearOption(userSettings, "enchantChoices", null);
     const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
     chosenId = Array.isArray(forSlot) ? (forSlot.length > 0 ? forSlot[0] : null) : forSlot;
   }
@@ -753,7 +753,7 @@ function getChosenEnchant(userSettings: any, slot: string, spec: string, enchant
   // when they picked several but the run isn't expanding variants (single selection behaves as a plain choice).
   let chosenId: string | null = enchantOverride && enchantOverride[slot] ? enchantOverride[slot] : null;
   if (!chosenId) {
-    const choices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
+    const choices = getGearOption(userSettings, "enchantChoices", null);
     const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
     chosenId = Array.isArray(forSlot) ? (forSlot.length > 0 ? forSlot[0] : null) : forSlot;
   }

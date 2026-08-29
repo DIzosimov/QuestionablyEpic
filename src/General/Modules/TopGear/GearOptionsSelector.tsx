@@ -1,5 +1,5 @@
 import React from "react";
-import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel, Checkbox, Tooltip, Chip } from "@mui/material";
+import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel, Checkbox, Tooltip, Chip, Switch } from "@mui/material";
 import { gemDB } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
 import { getFolioOptions } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
@@ -9,6 +9,10 @@ import { getFolioOptions } from "Retail/Engine/EffectFormulas/Generic/PatchEffec
 /* ---------------------------------------------------------------------------------------------- */
 // These are choices about the set being built, the same as picking which items to include, so they belong next to
 // item selection rather than in the global settings panel. Each Top Gear run uses exactly one configuration.
+//
+// The whole section is behind a Detailed toggle. Off - which is the default - Top Gear looks and behaves exactly
+// as it did before any of this existed, and the engine ignores these settings entirely (see getGearOption), so a
+// profile that was configured once can't keep steering later runs from a panel the player has collapsed.
 
 const SLOT_LABELS: { [key: string]: string } = {
   Head: "Head", Shoulder: "Shoulder", Chest: "Chest", Legs: "Legs",
@@ -65,8 +69,32 @@ export default function GearOptionsSelector(props: any) {
     </Grid>
   );
 
+  const detailed = value("detailedGearOptions", false) === true;
+
+  const toggleBar = (
+    <Grid item xs={12}>
+      <Paper elevation={0} style={{ backgroundColor: "rgba(28,28,28,0.5)", padding: "2px 10px" }}>
+        <Tooltip placement="right" title={
+          <Typography variant="caption">
+            Off, Top Gear picks your gems, enchants and Folio runes for you. On, you can pin them yourself and
+            select several per slot to have every combination ranked.
+          </Typography>
+        }>
+          <FormControlLabel
+            control={<Switch size="small" checked={detailed}
+                             onChange={(e) => updateSetting("detailedGearOptions", e.target.checked)} />}
+            label={<Typography variant="body2" color="primary">Detailed: choose gems, enchants and Folio runes</Typography>}
+          />
+        </Tooltip>
+      </Paper>
+    </Grid>
+  );
+
+  if (!detailed) return <Grid container spacing={1} style={{ marginTop: 4 }}>{toggleBar}</Grid>;
+
   return (
     <Grid container spacing={1} style={{ marginTop: 4 }}>
+      {toggleBar}
       {section("Gems", "Pick the gems you want socketed. Select several and each combination is ranked as its own set. Automatic uses the default for your spec.", (
         <>
           {dropdown("Meta Gem", value("selectedMetaGem", 0), (v) => updateSetting("selectedMetaGem", Number(v)),

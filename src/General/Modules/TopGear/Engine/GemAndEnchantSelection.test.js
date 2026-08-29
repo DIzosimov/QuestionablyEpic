@@ -1,6 +1,6 @@
 import Player from "General/Modules/Player/Player";
 import Item from "General/Items/Item";
-import { buildNewWepCombos } from "General/Engine/ItemUtilities";
+import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
 import { runTopGear } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
 import { getFolioGems } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
@@ -13,9 +13,11 @@ import rootReducer from "Redux/Reducers/RootReducer";
 */
 
 const base = rootReducer(undefined, { type: "@@INIT" }).playerSettings;
+// The detailed gear options toggle gates every setting in this file, so these tests run with it on. Its own
+// behaviour - and what happens to these settings when it's off - is covered in the last describe block.
 const cfg = (overrides = {}) => {
   const s = JSON.parse(JSON.stringify(base));
-  Object.entries(overrides).forEach(([k, v]) => {
+  Object.entries({ detailedGearOptions: true, ...overrides }).forEach(([k, v]) => {
     s[k] = s[k] ? { ...s[k], value: v } : { value: v, options: [], category: "gems", type: "hidden", gameType: "Retail" };
   });
   return s;
@@ -131,13 +133,13 @@ describe("Gem selection and the replace / fill-empty switch", () => {
 
 describe("Folio runes are selectable", () => {
   test("slot 4 can be overridden away from the best stat", () => {
-    const set = (v) => ({ folioSlot4: { value: v, options: [], category: "omniumFolio", type: "hidden", gameType: "Retail" } });
+    const set = (v) => cfg({ folioSlot4: v });
     expect(getFolioGems(set("Vers"), "haste")[3]).toEqual(1279613);
     expect(getFolioGems(set("Crit"), "haste")[3]).toEqual(1279609);
   });
 
   test("a stale rune name falls back to Automatic instead of losing the slot", () => {
-    const stale = { folioSlot1: { value: "No Such Rune", options: [], category: "omniumFolio", type: "hidden", gameType: "Retail" } };
+    const stale = cfg({ folioSlot1: "No Such Rune" });
     expect(getFolioGems(stale, "haste").length).toEqual(5);
     expect(getFolioGems(stale, "haste")[0]).toEqual(1279599);
   });
@@ -284,5 +286,63 @@ describe("Gems and enchants expand together", () => {
     const forcedWorst = run(cfg({ enchantChoices: { CombinedWeapon: ["Acuity of the Ren'dorei"] } })).itemSet.setHPS;
     const choice = run(cfg({ enchantChoices: { CombinedWeapon: ["Acuity of the Ren'dorei", "Arcane Mastery"] } })).itemSet.setHPS;
     expect(choice).toBeGreaterThanOrEqual(forcedWorst);
+  });
+});
+
+/*
+  The detailed options are opt-in. A player who configures gems and enchants, then switches back to the simple
+  view, must get the plain run back - settings left behind in their profile can't keep steering it invisibly.
+*/
+describe("The detailed gear options toggle gates the whole section", () => {
+  const off = (overrides = {}) => cfg({ ...overrides, detailedGearOptions: false });
+
+  test("defaults to off, so an untouched profile is a plain run", () => {
+    expect(base.detailedGearOptions.value).toBe(false);
+    expect(isDetailedGearOptions(base)).toBe(false);
+  });
+
+  test("a stale enchant choice is ignored while the toggle is off", () => {
+    const chosen = { CombinedWeapon: ["Berserker's Rage"] };
+
+    expect(run(cfg({ enchantChoices: chosen })).itemSet.enchantBreakdown["CombinedWeapon"]).toEqual("Berserker's Rage");
+    expect(run(off({ enchantChoices: chosen })).itemSet.enchantBreakdown["CombinedWeapon"]).toEqual("Arcane Mastery");
+  });
+
+  test("a stale gem choice is ignored while the toggle is off", () => {
+    const chosen = [240914]; // Flawless Deadly Lapis - vers major, not the Evoker's automatic pick.
+
+    const on = run(cfg({ selectedGems: chosen })).itemSet.enchantBreakdown["Gems"];
+    const plain = run(off({ selectedGems: chosen })).itemSet.enchantBreakdown["Gems"];
+
+    expect(on).toContain(240914);
+    expect(plain).not.toContain(240914);
+    expect(plain).toEqual(run(off()).itemSet.enchantBreakdown["Gems"]);
+  });
+
+  test("a stale Folio choice is ignored while the toggle is off", () => {
+    const automatic = getFolioGems({}, "mastery");
+
+    expect(getFolioGems(cfg({ folioSlot4: "Crit" }), "mastery")).not.toEqual(automatic);
+    expect(getFolioGems(off({ folioSlot4: "Crit" }), "mastery")).toEqual(automatic);
+  });
+
+  test("multi-select expansion doesn't happen while the toggle is off", () => {
+    // Several gems and enchants would normally expand the run into many variants. Off, it's a single pass.
+    const many = { selectedGems: [240898, 240890, 240914], enchantChoices: { CombinedWeapon: ["Arcane Mastery", "Berserker's Rage"] } };
+
+    expect(run(off(many)).itemsCompared).toEqual(run(off()).itemsCompared);
+    expect(run(cfg(many)).itemsCompared).toBeGreaterThan(run(off(many)).itemsCompared);
+  });
+
+  test("getGearOption tolerates the string form the settings panel writes", () => {
+    expect(isDetailedGearOptions({ detailedGearOptions: { value: "true" } })).toBe(true);
+    expect(isDetailedGearOptions({ detailedGearOptions: { value: false } })).toBe(false);
+    expect(isDetailedGearOptions({})).toBe(false);
+    expect(isDetailedGearOptions(null)).toBe(false);
+
+    expect(getGearOption(off(), "selectedGems", [])).toEqual([]);
+    expect(getGearOption(cfg({ selectedGems: [240898] }), "selectedGems", [])).toEqual([240898]);
+    // A key that isn't in the profile at all still comes back as its fallback.
+    expect(getGearOption(cfg(), "noSuchOption", "Automatic")).toEqual("Automatic");
   });
 });

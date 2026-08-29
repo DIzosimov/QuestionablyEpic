@@ -56,6 +56,9 @@ const initialState : RootState = {
 
     // Gems, enchants and Folio runes. 0 / "Automatic" means "let the engine pick", which is what it did before
     // any of this was selectable, so an untouched profile produces identical results.
+    // detailedGearOptions gates the whole section: off, the engine ignores every setting below and Top Gear runs
+    // exactly as it did before they existed.
+    detailedGearOptions: {value: false, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
     selectedGems: {value: [], options: [], category: "gems", type: "hidden", gameType: "Retail"},
     selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
     replaceExistingGems: {value: true, options: [true, false], category: "gems", type: "hidden", gameType: "Retail"},

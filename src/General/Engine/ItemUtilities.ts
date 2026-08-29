@@ -1385,3 +1385,32 @@ function sumObjectsByKey<T extends Record<string | number, number>>(objs: T[]): 
     return result;
   }, {} as T);
 } */
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                  Detailed gear options toggle                                   */
+/* ---------------------------------------------------------------------------------------------- */
+// Gem, enchant and Folio selection is opt-in. With the toggle off Top Gear behaves exactly as it did before any
+// of it existed: every one of these settings reads as its "Automatic" default, so a profile that was configured
+// once and then switched back to the simple view can't quietly keep steering the run.
+
+export const DETAILED_GEAR_OPTIONS = "detailedGearOptions";
+
+export function isDetailedGearOptions(userSettings: any): boolean {
+  if (!userSettings || typeof userSettings !== "object") return false;
+  const setting = userSettings[DETAILED_GEAR_OPTIONS];
+  if (!setting) return false;
+  // The settings panel writes checkbox values straight through, so tolerate the string form.
+  return setting.value === true || setting.value === "true";
+}
+
+/**
+ * Reads one of the detailed gear options, falling back to its Automatic default while the toggle is off.
+ * @param userSettings The raw player settings object.
+ * @param key The setting name.
+ * @param fallback The value that reproduces the pre-toggle behaviour.
+ */
+export function getGearOption(userSettings: any, key: string, fallback: any): any {
+  if (!isDetailedGearOptions(userSettings)) return fallback;
+  const setting = userSettings && typeof userSettings === "object" ? userSettings[key] : null;
+  return setting && setting.value !== undefined ? setting.value : fallback;
+}
