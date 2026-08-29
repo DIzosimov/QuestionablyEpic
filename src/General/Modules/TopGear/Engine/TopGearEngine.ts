@@ -262,6 +262,50 @@ export function buildGemLoadouts(selectedGems: number[], sockets: number, cap: n
   return loadouts;
 }
 
+// Total gem x enchant variants a single run will expand into. Every variant re-evaluates every gear set, so this
+// is what stops a handful of multi-selects turning into a run that never finishes.
+const MAX_SET_VARIANTS = 24;
+
+/**
+ * Expands the player's per-slot enchant selections into every distinct combination.
+ * A slot left empty (or on Automatic) contributes nothing and keeps the engine's own pick for that slot.
+ */
+export function buildEnchantCombinations(enchantChoices: any, cap: number = MAX_SET_VARIANTS): any[] {
+  if (!enchantChoices || typeof enchantChoices !== "object") return [];
+
+  const slots = Object.keys(enchantChoices).filter((slot) => Array.isArray(enchantChoices[slot]) && enchantChoices[slot].length > 0);
+  if (slots.length === 0) return [];
+
+  // Nothing to expand if every slot has a single pick - that's one combination, not a search.
+  let combinations: any[] = [{}];
+  slots.forEach((slot) => {
+    const next: any[] = [];
+    combinations.forEach((combo) => {
+      enchantChoices[slot].forEach((id: string) => {
+        if (next.length < cap) next.push({ ...combo, [slot]: id });
+      });
+    });
+    combinations = next;
+  });
+
+  return combinations;
+}
+
+/** Pairs every gem loadout with every enchant combination, capped so a run stays finite. */
+export function buildSetVariants(gemLoadouts: number[][], enchantCombos: any[], cap: number = MAX_SET_VARIANTS) {
+  const gems = gemLoadouts.length > 0 ? gemLoadouts : [null];
+  const enchants = enchantCombos.length > 0 ? enchantCombos : [null];
+  const variants: { gemLoadout: number[] | null; enchantOverride: any }[] = [];
+
+  for (const gemLoadout of gems) {
+    for (const enchantOverride of enchants) {
+      if (variants.length >= cap) return variants;
+      variants.push({ gemLoadout, enchantOverride });
+    }
+  }
+  return variants;
+}
+
 function getGemOptions(spec: string, contentType: contentTypes) {
   if (spec === "Holy Paladin") {
     // Crit / haste, crit / mastery
@@ -368,14 +412,23 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   const maxSockets = itemSets.reduce((most: number, set: ItemSet) => Math.max(most, set.itemList.reduce((n: number, item: Item) => n + (item.socket || 0), 0)), 0);
   const gemLoadouts = selectedGems.length > 1 ? buildGemLoadouts(selectedGems, maxSockets) : [];
 
+  // Enchants can be multi-selected per slot too. Gems and enchants are expanded together into a single list of
+  // variants, each of which is a complete, wearable configuration ranked alongside every other set.
+  const enchantChoiceSetting = getSetting(userSettings, "enchantChoices");
+  const enchantCombos = buildEnchantCombinations(enchantChoiceSetting);
+  const variants = buildSetVariants(gemLoadouts, enchantCombos.length > 1 ? enchantCombos : []);
+
   for (var i = 0; i < itemSets.length; i++) {
-    if (gemLoadouts.length > 0) {
-      gemLoadouts.forEach((loadout) => {
-        resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0, loadout));
+    if (variants.length > 1) {
+      variants.forEach((variant) => {
+        resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0, variant.gemLoadout || undefined, variant.enchantOverride || undefined));
       });
     }
     else {
-      resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0));
+      const only = variants[0];
+      resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
+                              only && only.gemLoadout ? only.gemLoadout : undefined,
+                              only && only.enchantOverride ? only.enchantOverride : undefined));
     }
   }
 
@@ -685,9 +738,25 @@ function sumScore(obj: any) {
 
 // Reads the player's per-slot enchant choice. Anything unset or unrecognised falls back to Automatic, which is
 // the pick the engine made before any of this was selectable.
-function getChosenEnchant(userSettings: any, slot: string, spec: string) {
-  const choices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
-  const chosenId = choices && typeof choices === "object" ? choices[slot] : null;
+function getChosenEnchantId(userSettings: any, slot: string, enchantOverride?: any) {
+  let chosenId: string | null = enchantOverride && enchantOverride[slot] ? enchantOverride[slot] : null;
+  if (!chosenId) {
+    const choices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
+    const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
+    chosenId = Array.isArray(forSlot) ? (forSlot.length > 0 ? forSlot[0] : null) : forSlot;
+  }
+  return chosenId && chosenId !== "Automatic" ? getEnchantById(chosenId) : undefined;
+}
+
+function getChosenEnchant(userSettings: any, slot: string, spec: string, enchantOverride?: any) {
+  // A variant pins one enchant per slot. Otherwise fall back to the player's selection, taking the first entry
+  // when they picked several but the run isn't expanding variants (single selection behaves as a plain choice).
+  let chosenId: string | null = enchantOverride && enchantOverride[slot] ? enchantOverride[slot] : null;
+  if (!chosenId) {
+    const choices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
+    const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
+    chosenId = Array.isArray(forSlot) ? (forSlot.length > 0 ? forSlot[0] : null) : forSlot;
+  }
   const chosen = chosenId && chosenId !== "Automatic" ? getEnchantById(chosenId) : undefined;
 
   // A choice that isn't legal on this slot (stale selection after a patch) is ignored rather than dropping the
@@ -721,7 +790,7 @@ function applyEnchant(bonus_stats: Stats, enchant: any, highestWeight: string) {
   }
 }
 
-function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string, userSettings: any = {}) {
+function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string, userSettings: any = {}, enchantOverride?: any) {
   let enchants: {[key: string]: string | number | number[]} = {}; // TODO: Cleanup
 
   // Rings. Every ring enchant grants the same amount, so Automatic picks the one matching the player's best stat.
@@ -729,9 +798,7 @@ function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, conte
   // isn't worth the extra churn in what the player is told to enchant.
   const highestWeight = getHighestWeight(castModel);
 
-  const ringChoices = userSettings && userSettings.enchantChoices ? userSettings.enchantChoices.value : null;
-  const ringChoiceId = ringChoices && typeof ringChoices === "object" ? ringChoices["Finger"] : null;
-  let ringEnchant = ringChoiceId && ringChoiceId !== "Automatic" ? getEnchantById(ringChoiceId) : undefined;
+  let ringEnchant = getChosenEnchantId(userSettings, "Finger", enchantOverride);
   if (!ringEnchant || !ringEnchant.slots.includes("Finger")) {
     // Automatic: Eyes of the Eagle where the spec uses it, otherwise the enchant matching their best stat.
     ringEnchant = getDefaultEnchant("Finger", spec) ||
@@ -745,14 +812,14 @@ function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, conte
 
   // Armour slots. One entry each today, but they read from the DB so adding options is a data change.
   ["Head", "Chest", "Shoulder", "Legs", "Feet"].forEach((slot) => {
-    const enchant = getChosenEnchant(userSettings, slot, spec);
+    const enchant = getChosenEnchant(userSettings, slot, spec, enchantOverride);
     applyEnchant(bonus_stats, enchant, highestWeight);
     enchants[slot] = enchant ? enchant.name : "";
   });
 
   // Weapon. Automatic keeps the per-spec default; the secondary enchants are budgeted higher than the intellect
   // one, so this is a real choice rather than a cosmetic one.
-  const weaponEnchant = getChosenEnchant(userSettings, "CombinedWeapon", spec);
+  const weaponEnchant = getChosenEnchant(userSettings, "CombinedWeapon", spec, enchantOverride);
   applyEnchant(bonus_stats, weaponEnchant, highestWeight);
   const wepEnchantName = weaponEnchant ? weaponEnchant.name : "";
   enchants["CombinedWeapon"] = wepEnchantName;
@@ -810,7 +877,7 @@ export function getTopGearGems(gemID: number, gemCount: number, bonus_stats: Sta
  * @param {*} castModel
  * @returns 
  */
-function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[]) {
+function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any) {
   // == Setup ==
     const statBreakdown = {
     gear: {},
@@ -874,7 +941,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
 
 
   // == Enchants and gems ==
-  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec, userSettings);
+  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec, userSettings, enchantOverride);
   compileStats(bonus_stats, enchantStats);
   statBreakdown.enchants = enchantStats;
   

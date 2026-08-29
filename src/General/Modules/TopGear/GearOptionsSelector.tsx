@@ -1,5 +1,5 @@
 import React from "react";
-import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel, Checkbox, Tooltip } from "@mui/material";
+import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel, Checkbox, Tooltip, Chip } from "@mui/material";
 import { gemDB } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
 import { getFolioOptions } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
@@ -97,6 +97,10 @@ export default function GearOptionsSelector(props: any) {
             </TextField>
           </Grid>
           <Grid item xs={12}>
+            <Typography variant="caption" style={{ color: "#f0c674", display: "block", marginBottom: 4 }}>
+              Selecting several gems and enchants multiplies the sets evaluated. The expansion is capped, so past a
+              point extra selections are ignored rather than making the run crawl.
+            </Typography>
             <Tooltip placement="right" title={
               <Typography variant="caption">
                 Unticked, gems you already have socketed are kept and only empty sockets get filled — so the result
@@ -113,13 +117,46 @@ export default function GearOptionsSelector(props: any) {
         </>
       ))}
 
-      {section("Enchants", "Pick an enchant per slot. Automatic uses the default for your spec.", (
+      {section("Enchants", "Pick one or more per slot. Selecting several ranks each combination as its own set.", (
         ENCHANTABLE_SLOTS.map((slot) => {
           const options = getEnchantsForSlot(slot, spec);
           if (options.length === 0) return null;
-          return dropdown(SLOT_LABELS[slot] || slot, enchantChoices[slot] || "Automatic",
-            (v) => setEnchant(slot, v),
-            [{ value: "Automatic", label: "Automatic" }].concat(options.map((e) => ({ value: e.id, label: e.name }))));
+          const chosen: string[] = Array.isArray(enchantChoices[slot]) ? enchantChoices[slot] : (enchantChoices[slot] ? [enchantChoices[slot]] : []);
+          const toggle = (id: string) =>
+            setEnchant(slot, chosen.indexOf(id) > -1 ? chosen.filter((c) => c !== id) : chosen.concat([id]));
+
+          return (
+            <Grid item xs={12} sm={6} md={4} key={slot}>
+              <Paper elevation={0} style={{ backgroundColor: "rgba(20,20,20,0.6)", padding: 8, height: "100%" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <Typography variant="subtitle2" style={{ color: "goldenrod" }}>{SLOT_LABELS[slot] || slot}</Typography>
+                  <div>
+                    {/* Default clears the selection and lets the engine pick; None turns the slot off entirely. */}
+                    <Chip size="small" label="DEFAULT" onClick={() => setEnchant(slot, [])}
+                          variant={chosen.length === 0 ? "filled" : "outlined"} style={{ marginRight: 4 }} />
+                    <Chip size="small" label="NONE" onClick={() => setEnchant(slot, ["None"])}
+                          variant={chosen.indexOf("None") > -1 ? "filled" : "outlined"} />
+                  </div>
+                </div>
+                <Typography variant="caption" style={{ color: "rgba(255,255,255,0.4)", display: "block", marginBottom: 4 }}>
+                  {chosen.length === 0 ? "Automatic" : chosen.length + " selected"}
+                </Typography>
+                <Divider style={{ borderColor: "rgba(255,255,255,0.1)", marginBottom: 4 }} />
+                {options.map((e) => (
+                  <div key={e.id} onClick={() => toggle(e.id)}
+                       style={{
+                         display: "flex", alignItems: "center", cursor: "pointer", padding: "1px 2px", borderRadius: 3,
+                         border: chosen.indexOf(e.id) > -1 ? "1px solid rgba(255,200,80,0.55)" : "1px solid transparent",
+                       }}>
+                    <Checkbox size="small" checked={chosen.indexOf(e.id) > -1} style={{ padding: 3 }} />
+                    <Typography variant="caption" style={{ color: chosen.indexOf(e.id) > -1 ? "goldenrod" : "rgba(255,255,255,0.8)" }}>
+                      {e.name}
+                    </Typography>
+                  </div>
+                ))}
+              </Paper>
+            </Grid>
+          );
         })
       ))}
 

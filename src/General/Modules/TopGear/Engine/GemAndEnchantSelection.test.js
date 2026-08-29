@@ -57,23 +57,23 @@ describe("Automatic reproduces the previous behaviour", () => {
 
 describe("Enchants are selectable per slot", () => {
   test("a chosen weapon enchant overrides the spec default", () => {
-    const r = run(cfg({ enchantChoices: { CombinedWeapon: "Berserker's Rage" } }));
+    const r = run(cfg({ enchantChoices: { CombinedWeapon: ["Berserker's Rage"] } }));
     expect(r.itemSet.enchantBreakdown["CombinedWeapon"]).toEqual("Berserker's Rage");
   });
 
   test("a chosen ring enchant overrides the best-stat pick", () => {
-    const r = run(cfg({ enchantChoices: { Finger: "Silvermoon's Tenacity" } }));
+    const r = run(cfg({ enchantChoices: { Finger: ["Silvermoon's Tenacity"] } }));
     expect(r.itemSet.enchantBreakdown["Finger"]).toEqual("Silvermoon's Tenacity");
   });
 
   test("choosing a worse enchant measurably lowers throughput", () => {
     const auto = run(cfg()).itemSet.setHPS;
-    const forced = run(cfg({ enchantChoices: { CombinedWeapon: "Acuity of the Ren'dorei" } })).itemSet.setHPS;
+    const forced = run(cfg({ enchantChoices: { CombinedWeapon: ["Acuity of the Ren'dorei"] } })).itemSet.setHPS;
     expect(forced).toBeLessThan(auto);
   });
 
   test("an enchant that isn't legal on the slot is ignored rather than dropping the enchant", () => {
-    const r = run(cfg({ enchantChoices: { Head: "Berserker's Rage" } }));
+    const r = run(cfg({ enchantChoices: { Head: ["Berserker's Rage"] } }));
     expect(r.itemSet.enchantBreakdown["Head"]).toEqual("Empowered Hex of Leeching");
   });
 
@@ -211,5 +211,78 @@ describe("Selecting several gems is ranked like any other choice", () => {
     const one = run(cfg({ selectedGems: [240898] })).itemsCompared;
     const several = run(cfg({ selectedGems: [240898, 240890, 240914] })).itemsCompared;
     expect(several).toBeGreaterThan(one);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                    Multi-selecting enchants expands the candidate sets                          */
+/* ---------------------------------------------------------------------------------------------- */
+const { buildEnchantCombinations, buildSetVariants } = require("./TopGearEngine");
+
+describe("Enchant combinations", () => {
+  test("one option per slot is a single combination, not a search", () => {
+    expect(buildEnchantCombinations({ Chest: ["Mark of the Worldsoul"] })).toEqual([{ Chest: "Mark of the Worldsoul" }]);
+  });
+
+  test("two options in one slot give two combinations", () => {
+    const combos = buildEnchantCombinations({ Chest: ["Mark of the Worldsoul", "Mark of the Magister"] });
+    expect(combos.length).toEqual(2);
+  });
+
+  test("options across slots are combined, not concatenated", () => {
+    const combos = buildEnchantCombinations({
+      Chest: ["Mark of the Worldsoul", "Mark of the Magister"],
+      CombinedWeapon: ["Arcane Mastery", "Berserker's Rage"],
+    });
+    expect(combos.length).toEqual(4);
+    combos.forEach((c) => {
+      expect(c).toHaveProperty("Chest");
+      expect(c).toHaveProperty("CombinedWeapon");
+    });
+  });
+
+  test("empty slots contribute nothing", () => {
+    expect(buildEnchantCombinations({ Chest: [], Head: [] })).toEqual([]);
+    expect(buildEnchantCombinations({})).toEqual([]);
+    expect(buildEnchantCombinations(null)).toEqual([]);
+  });
+
+  test("the expansion is capped", () => {
+    const many = {
+      Chest: ["Mark of the Worldsoul", "Mark of the Magister"],
+      CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"],
+      Finger: ["Nature's Fury", "Zul'jin's Mastery", "Silvermoon's Alacrity", "Silvermoon's Tenacity"],
+    };
+    expect(buildEnchantCombinations(many, 10).length).toBeLessThanOrEqual(10);
+  });
+});
+
+describe("Gems and enchants expand together", () => {
+  test("variants are the product of both, capped", () => {
+    const gems = [[1, 1], [2, 2]];
+    const enchants = [{ Chest: "a" }, { Chest: "b" }, { Chest: "c" }];
+    expect(buildSetVariants(gems, enchants, 100).length).toEqual(6);
+    expect(buildSetVariants(gems, enchants, 4).length).toEqual(4);
+  });
+
+  test("neither selected still yields exactly one variant", () => {
+    expect(buildSetVariants([], [], 10)).toEqual([{ gemLoadout: null, enchantOverride: null }]);
+  });
+
+  test("multi-selecting enchants evaluates more sets and still returns one winner", () => {
+    const single = run(cfg({ enchantChoices: { CombinedWeapon: ["Arcane Mastery"] } }));
+    const multi = run(cfg({ enchantChoices: { CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"] } }));
+
+    expect(multi.itemsCompared).toBeGreaterThan(single.itemsCompared);
+    expect(multi.itemSet).toBeTruthy();
+    // The winner must be one of the enchants actually offered.
+    expect(["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"])
+      .toContain(multi.itemSet.enchantBreakdown["CombinedWeapon"]);
+  });
+
+  test("offering extra enchants never produces a worse winner than offering one", () => {
+    const forcedWorst = run(cfg({ enchantChoices: { CombinedWeapon: ["Acuity of the Ren'dorei"] } })).itemSet.setHPS;
+    const choice = run(cfg({ enchantChoices: { CombinedWeapon: ["Acuity of the Ren'dorei", "Arcane Mastery"] } })).itemSet.setHPS;
+    expect(choice).toBeGreaterThanOrEqual(forcedWorst);
   });
 });
