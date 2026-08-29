@@ -34,6 +34,7 @@ export default function GearOptionsSelector(props: any) {
     playerSettings && playerSettings[key] !== undefined ? playerSettings[key].value : fallback;
 
   const enchantChoices = value("enchantChoices", {}) || {};
+  const selectedGems: number[] = value("selectedGems", []) || [];
   const setEnchant = (slot: string, id: string) =>
     updateSetting("enchantChoices", { ...enchantChoices, [slot]: id });
 
@@ -66,12 +67,35 @@ export default function GearOptionsSelector(props: any) {
 
   return (
     <Grid container spacing={1} style={{ marginTop: 4 }}>
-      {section("Gems", "Pick the gem you want socketed. Automatic uses the default for your spec.", (
+      {section("Gems", "Pick the gems you want socketed. Select several and each combination is ranked as its own set. Automatic uses the default for your spec.", (
         <>
           {dropdown("Meta Gem", value("selectedMetaGem", 0), (v) => updateSetting("selectedMetaGem", Number(v)),
             [{ value: 0, label: "Automatic" }].concat(dedupe(metas).map((g) => ({ value: g.id, label: gemLabel(g) }))))}
-          {dropdown("Gem", value("selectedGem", 0), (v) => updateSetting("selectedGem", Number(v)),
-            [{ value: 0, label: "Automatic" }].concat(dedupe(stat).map((g) => ({ value: g.id, label: gemLabel(g) }))))}
+          <Grid item xs={12} sm={8} md={6}>
+            <TextField
+              select fullWidth size="small" variant="outlined" label="Gems"
+              SelectProps={{
+                multiple: true,
+                renderValue: (selected: any) =>
+                  (selected as number[]).length === 0
+                    ? "Automatic"
+                    : (selected as number[]).map((id) => {
+                        const g = gemDB.find((x) => x.id === id);
+                        return g ? g.name.replace("Flawless ", "") : id;
+                      }).join(", "),
+              }}
+              value={selectedGems}
+              onChange={(e) => updateSetting("selectedGems", (e.target.value as unknown as number[]).filter((v) => v))}
+              helperText="Pick more than one and Top Gear ranks each combination as its own set."
+            >
+              {dedupe(stat).map((g) => (
+                <MenuItem key={g.id} value={g.id}>
+                  <Checkbox size="small" checked={selectedGems.indexOf(g.id) > -1} />
+                  {gemLabel(g)}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
           <Grid item xs={12}>
             <Tooltip placement="right" title={
               <Typography variant="caption">

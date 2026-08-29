@@ -56,7 +56,7 @@ const initialState : RootState = {
 
     // Gems, enchants and Folio runes. 0 / "Automatic" means "let the engine pick", which is what it did before
     // any of this was selectable, so an untouched profile produces identical results.
-    selectedGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
+    selectedGems: {value: [], options: [], category: "gems", type: "hidden", gameType: "Retail"},
     selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
     replaceExistingGems: {value: true, options: [true, false], category: "gems", type: "hidden", gameType: "Retail"},
     enchantChoices: {value: {}, options: [], category: "enchants", type: "hidden", gameType: "Retail"},

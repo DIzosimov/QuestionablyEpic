@@ -8,6 +8,11 @@ type GemEntry = {
     stats: { [key: string]: number };
   }
 
+// The current tier's stat gems grant this split: the major stat at GEM_MAJOR_STAT, the minor at GEM_MINOR_STAT.
+// Kept here so the engine's gem lookup and any future tier update only have to change in one place.
+export const GEM_MAJOR_STAT = 16;
+export const GEM_MINOR_STAT = 9;
+
 export const gemDB: GemEntry[] = [
     {
       id: 240969,
@@ -28,98 +33,84 @@ export const gemDB: GemEntry[] = [
       element: "Lapis",
       name: "Flawless Deadly Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_blue",
-      stats: { versatility: 12, crit: 5 },
+      stats: { versatility: 16, crit: 9 },
     },
     {
       id: 240918,
       element: "Lapis",
       name: "Flawless Masterful Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_blue",
-      stats: { versatility: 12, mastery: 5 },
+      stats: { versatility: 16, mastery: 9 },
     },
     {
       id: 240916,
       element: "Lapis",
       name: "Flawless Quick Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_blue",
-      stats: { versatility: 12, haste: 5 },
+      stats: { versatility: 16, haste: 9 },
     },
     {
       id: 240910,
       element: "Garnet",
       name: "Flawless Versatile Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_red",
-      stats: { crit: 12, versatility: 5 },
+      stats: { crit: 16, versatility: 9 },
     },
     {
       id: 240906,
       element: "Garnet",
       name: "Flawless Quick Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_red",
-      stats: { crit: 12, haste: 5 },
+      stats: { crit: 16, haste: 9 },
     },
     {
       id: 240908,
       element: "Garnet",
       name: "Flawless Masterful Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_red",
-      stats: { crit: 12, mastery: 5 },
+      stats: { crit: 16, mastery: 9 },
     },
     {
       id: 240902,
       element: "Amethyst",
       name: "Flawless Versatile Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_purple",
-      stats: { mastery: 12, versatility: 5 },
-    },
-    {
-      id: 240902,
-      element: "Amethyst",
-      name: "Flawless Versatile Amethyst",
-      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_purple",
-      stats: { mastery: 12, versatility: 5 },
+      stats: { mastery: 16, versatility: 9 },
     },
     {
       id: 240900,
       element: "Amethyst",
       name: "Flawless Quick Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_purple",
-      stats: { mastery: 12, haste: 5 },
+      stats: { mastery: 16, haste: 9 },
     },
     {
       id: 240898,
       element: "Amethyst",
       name: "Flawless Deadly Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_purple",
-      stats: { mastery: 12, crit: 5 },
+      stats: { mastery: 16, crit: 9 },
     },
     {
       id: 240894,
       element: "Peridot",
       name: "Flawless Versatile Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_green",
-      stats: { haste: 12, versatility: 5 },
+      stats: { haste: 16, versatility: 9 },
     },
      {
       id: 240892,
       element: "Peridot",
       name: "Flawless Masterful Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_green",
-      stats: { haste: 12, mastery: 5 },
-    },
-        {
-      id: 240892,
-      element: "Peridot",
-      name: "Flawless Masterful Peridot",
-      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_green",
-      stats: { haste: 12, mastery: 5 },
+      stats: { haste: 16, mastery: 9 },
     },
       {
       id: 240890,
       element: "Peridot",
       name: "Flawless Deadly Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_green",
-      stats: { haste: 12, crit: 5 },
+      stats: { haste: 16, crit: 9 },
     },
     {
       id: 213488,

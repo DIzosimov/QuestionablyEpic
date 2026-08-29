@@ -90,41 +90,41 @@ describe("Gem selection and the replace / fill-empty switch", () => {
   const gemsOf = (r) => r.itemSet.enchantBreakdown["Gems"];
 
   test("a chosen gem fills the non-meta sockets", () => {
-    const r = run(cfg({ selectedGem: 240914 })); // Flawless Deadly Lapis, vers/crit
+    const r = run(cfg({ selectedGems: [240914] })); // Flawless Deadly Lapis, vers/crit
     gemsOf(r).slice(1).forEach((id) => expect(id).toEqual(240914));
   });
 
   test("a chosen meta gem only replaces the meta socket", () => {
-    const r = run(cfg({ selectedMetaGem: 240969, selectedGem: 240914 }));
+    const r = run(cfg({ selectedMetaGem: 240969, selectedGems: [240914] }));
     expect(gemsOf(r)[0]).toEqual(240969);
     gemsOf(r).slice(1).forEach((id) => expect(id).toEqual(240914));
   });
 
   test("with replace on, gems already socketed are overwritten", () => {
-    const r = run(cfg({ selectedGem: 240914, replaceExistingGems: true }), "240890:240890");
+    const r = run(cfg({ selectedGems: [240914], replaceExistingGems: true }), "240890:240890");
     gemsOf(r).slice(1).forEach((id) => expect(id).toEqual(240914));
   });
 
   test("with replace off, gems already socketed are kept", () => {
-    const r = run(cfg({ selectedGem: 240914, replaceExistingGems: false }), "240890:240890");
+    const r = run(cfg({ selectedGems: [240914], replaceExistingGems: false }), "240890:240890");
     // 240890 was already socketed, so it survives rather than being swapped for the selection.
     expect(gemsOf(r)).toContain(240890);
   });
 
   test("with replace off, empty sockets still get filled", () => {
-    const r = run(cfg({ selectedGem: 240914, replaceExistingGems: false }), "");
+    const r = run(cfg({ selectedGems: [240914], replaceExistingGems: false }), "");
     expect(gemsOf(r).length).toBeGreaterThan(0);
     gemsOf(r).slice(1).forEach((id) => expect(id).toEqual(240914));
   });
 
   test("keeping worse gems scores lower than replacing them", () => {
-    const kept = run(cfg({ selectedGem: 240898, replaceExistingGems: false }), "240914:240914").itemSet.setHPS;
-    const replaced = run(cfg({ selectedGem: 240898, replaceExistingGems: true }), "240914:240914").itemSet.setHPS;
+    const kept = run(cfg({ selectedGems: [240898], replaceExistingGems: false }), "240914:240914").itemSet.setHPS;
+    const replaced = run(cfg({ selectedGems: [240898], replaceExistingGems: true }), "240914:240914").itemSet.setHPS;
     expect(replaced).toBeGreaterThan(kept);
   });
 
   test("an unrecognised socketed gem is treated as an empty socket", () => {
-    const r = run(cfg({ selectedGem: 240914, replaceExistingGems: false }), "999999:999999");
+    const r = run(cfg({ selectedGems: [240914], replaceExistingGems: false }), "999999:999999");
     gemsOf(r).slice(1).forEach((id) => expect(id).toEqual(240914));
   });
 });
@@ -140,5 +140,76 @@ describe("Folio runes are selectable", () => {
     const stale = { folioSlot1: { value: "No Such Rune", options: [], category: "omniumFolio", type: "hidden", gameType: "Retail" } };
     expect(getFolioGems(stale, "haste").length).toEqual(5);
     expect(getFolioGems(stale, "haste")[0]).toEqual(1279599);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                      Selecting several gems expands the candidate sets                          */
+/* ---------------------------------------------------------------------------------------------- */
+const { buildGemLoadouts } = require("./TopGearEngine");
+
+describe("Gem loadouts", () => {
+  const A = 240890, B = 240898, C = 240914;
+
+  test("one gem gives one loadout, filling every socket", () => {
+    expect(buildGemLoadouts([A], 4)).toEqual([[A, A, A, A]]);
+  });
+
+  test("two gems over two sockets give every distinct mix", () => {
+    const loadouts = buildGemLoadouts([A, B], 2);
+    expect(loadouts).toEqual([[A, A], [A, B], [B, B]]);
+  });
+
+  test("sockets are interchangeable, so mirrored mixes aren't produced twice", () => {
+    // [A,B] and [B,A] are the same stats, so only one should appear.
+    const loadouts = buildGemLoadouts([A, B], 2);
+    const asKeys = loadouts.map((l) => [...l].sort().join("-"));
+    expect(new Set(asKeys).size).toEqual(loadouts.length);
+  });
+
+  test("three gems over three sockets give all ten combinations", () => {
+    expect(buildGemLoadouts([A, B, C], 3).length).toEqual(10);
+  });
+
+  test("the expansion is capped so a run can't blow up", () => {
+    const loadouts = buildGemLoadouts([A, B, C], 8, 12);
+    expect(loadouts.length).toBeLessThanOrEqual(12);
+  });
+
+  test("every loadout fills exactly the socket count", () => {
+    buildGemLoadouts([A, B, C], 5).forEach((l) => expect(l.length).toEqual(5));
+  });
+
+  test("no gems or no sockets gives nothing to evaluate", () => {
+    expect(buildGemLoadouts([], 4)).toEqual([]);
+    expect(buildGemLoadouts([A, B], 0)).toEqual([]);
+  });
+
+  test("zero entries are ignored rather than socketed", () => {
+    expect(buildGemLoadouts([0, A, 0], 2)).toEqual([[A, A]]);
+  });
+});
+
+describe("Selecting several gems is ranked like any other choice", () => {
+  test("Top Gear still returns a set", () => {
+    expect(run(cfg({ selectedGems: [240890, 240898] }))).toBeTruthy();
+  });
+
+  test("the winning set uses gems the player actually selected", () => {
+    const chosen = [240890, 240898];
+    const gems = run(cfg({ selectedGems: chosen })).itemSet.enchantBreakdown["Gems"];
+    gems.slice(1).forEach((id) => expect(chosen).toContain(id));
+  });
+
+  test("offering a stronger gem alongside a weaker one wins at least as much as the weaker alone", () => {
+    const weakOnly = run(cfg({ selectedGems: [240914] })).itemSet.setHPS; // vers major, worst for this spec
+    const both = run(cfg({ selectedGems: [240914, 240898] })).itemSet.setHPS; // plus mastery major
+    expect(both).toBeGreaterThanOrEqual(weakOnly);
+  });
+
+  test("more candidate sets are evaluated when several gems are offered", () => {
+    const one = run(cfg({ selectedGems: [240898] })).itemsCompared;
+    const several = run(cfg({ selectedGems: [240898, 240890, 240914] })).itemsCompared;
+    expect(several).toBeGreaterThan(one);
   });
 });

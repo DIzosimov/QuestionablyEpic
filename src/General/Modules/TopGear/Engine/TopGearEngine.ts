@@ -16,7 +16,7 @@ import { CONSTANTS, MODEL_TYPES } from "General/Engine/CONSTANTS";
 import { getCircletEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/CyrcesCircletData"
 import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngineShared"
 import Item from "General/Items/Item";
-import { gemDB } from "Databases/GemDB";
+import { gemDB, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
 import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
 import { getFolioEffect, getFolioGems } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
@@ -76,7 +76,7 @@ function autoSocketItems(itemList: Item[]) {
 // This just grab the ID for us so that we're less likely to make errors.
 function getGemID(bigStat: string, littleStat: string): number {
   const foundGem = gemDB.filter(gem => bigStat in gem.stats && littleStat in gem.stats
-                                        && gem.stats[bigStat] === 12 && gem.stats[littleStat] === 5);
+                                        && gem.stats[bigStat] === GEM_MAJOR_STAT && gem.stats[littleStat] === GEM_MINOR_STAT);
   if (foundGem.length > 0) {
     return foundGem[0].id;
   }
@@ -170,14 +170,16 @@ function getMidnightGemOptions(spec: string, contentType: contentTypes, settings
  *
  * Equipped gems come from the SimC import, which stores them on the item as a colon separated gemString.
  */
-function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes, userSettings: any): number[] {
+function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes, userSettings: any, gemLoadout?: number[]): number[] {
   const sockets = Math.max(0, builtSet.setSockets);
   if (sockets === 0) return [];
 
-  // The gem the player picked for the filler sockets, falling back to the engine's automatic choice.
-  const chosenId = getSetting(userSettings, "selectedGem");
+  // When several gems are selected the caller hands us one specific loadout to evaluate; otherwise fall back to
+  // the single selected gem, and failing that the engine's automatic choice.
+  const selected = getSetting(userSettings, "selectedGems");
+  const singleSelection = Array.isArray(selected) && selected.length === 1 && selected[0] > 0 ? selected[0] : null;
   const automatic = getMidnightGemOptions(player.spec, contentType, userSettings);
-  const filler = typeof chosenId === "number" && chosenId > 0 ? chosenId : null;
+  const filler = singleSelection;
 
   // Meta is socket 0 and is chosen separately, since it is not interchangeable with the stat gems.
   const chosenMeta = getSetting(userSettings, "selectedMetaGem");
@@ -186,7 +188,11 @@ function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes
   const buildAutomatic = () => {
     const gems = automatic.slice(0, sockets);
     if (gems.length > 0) gems[0] = metaId;
-    for (let i = 1; i < gems.length; i++) if (filler) gems[i] = filler;
+    for (let i = 1; i < gems.length; i++) {
+      // A loadout takes precedence, then a single selected gem, then whatever the engine picked.
+      if (gemLoadout && gemLoadout.length > 0) gems[i] = gemLoadout[(i - 1) % gemLoadout.length];
+      else if (filler) gems[i] = filler;
+    }
     return gems;
   };
 
@@ -222,6 +228,38 @@ function getGemStats(gemArray: number[]) {
 
 
   return gem_stats;
+}
+
+// The most gem loadouts we'll expand a run into. Every loadout multiplies the number of sets Top Gear evaluates,
+// and the whole gem spread is worth a fraction of a percent, so this is deliberately modest.
+const MAX_GEM_LOADOUTS = 12;
+
+/**
+ * Turns the player's selected gems into the distinct ways they can fill a set's sockets.
+ *
+ * Sockets are interchangeable for stat purposes, so only the multiset matters - two of gem A and one of gem B is
+ * the same set of stats regardless of which socket holds which. That keeps the expansion to combinations rather
+ * than permutations. One selected gem yields one loadout, which is the same as the old single-gem behaviour.
+ */
+export function buildGemLoadouts(selectedGems: number[], sockets: number, cap: number = MAX_GEM_LOADOUTS): number[][] {
+  const gems = (selectedGems || []).filter((g) => g > 0);
+  if (gems.length === 0 || sockets <= 0) return [];
+  if (gems.length === 1) return [new Array(sockets).fill(gems[0])];
+
+  const loadouts: number[][] = [];
+  // Walk combinations with repetition, keeping gem order so each multiset is produced exactly once.
+  const walk = (startIndex: number, current: number[]) => {
+    if (loadouts.length >= cap) return;
+    if (current.length === sockets) { loadouts.push(current.slice()); return; }
+    for (let g = startIndex; g < gems.length; g++) {
+      current.push(gems[g]);
+      walk(g, current);
+      current.pop();
+      if (loadouts.length >= cap) return;
+    }
+  };
+  walk(0, []);
+  return loadouts;
 }
 
 function getGemOptions(spec: string, contentType: contentTypes) {
@@ -319,18 +357,24 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   
   // == Evaluate Sets ==
   // We'll explain this more in the evalSet function header but we assign each set a score that includes stats, effects and more.
-  for (var i = 0; i < itemSets.length; i++) {
-    // Create sets for each gem type.
-    const gemPoss = getGemOptions(player.spec, contentType) // TODO: Turn this into a function
+  // Selecting several gems expands each set into one candidate per gem loadout, which are then ranked together -
+  // the same way selecting two rings gives you two candidate sets. Selecting one (or none) leaves this at a
+  // single evaluation per set, exactly as before.
+  const selectedGemsSetting = getSetting(userSettings, "selectedGems");
+  const selectedGems: number[] = Array.isArray(selectedGemsSetting) ? selectedGemsSetting.filter((g: number) => g > 0) : [];
 
-    if (false) { // Add setting here.
-      if (gemPoss.length > 0) {
-        gemPoss.forEach(gem => {
-          resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, gem));
-        });
-      }
+  // Sockets are only known per set, but they're bounded, so build loadouts against the largest set and let each
+  // evaluation take the slice it needs.
+  const maxSockets = itemSets.reduce((most: number, set: ItemSet) => Math.max(most, set.itemList.reduce((n: number, item: Item) => n + (item.socket || 0), 0)), 0);
+  const gemLoadouts = selectedGems.length > 1 ? buildGemLoadouts(selectedGems, maxSockets) : [];
+
+  for (var i = 0; i < itemSets.length; i++) {
+    if (gemLoadouts.length > 0) {
+      gemLoadouts.forEach((loadout) => {
+        resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0, loadout));
+      });
     }
-    else { // Advanced Gems not turned on. 
+    else {
       resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0));
     }
   }
@@ -766,7 +810,7 @@ export function getTopGearGems(gemID: number, gemCount: number, bonus_stats: Sta
  * @param {*} castModel
  * @returns 
  */
-function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number) {
+function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[]) {
   // == Setup ==
     const statBreakdown = {
     gear: {},
@@ -892,7 +936,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
     
   }
   else {
-    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings);
+    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings, gemLoadout);
     const gemStats = getGemStats(enchants["Gems"]);
     statBreakdown.gems = gemStats;
 
