@@ -72,14 +72,14 @@ const initialState : RootState = {
     // Flasks and food are searchable too. Empty means the single choice in the consumables settings below stands,
     // which is what an untouched profile has, so nothing changes until the player pins something.
     flaskChoices: {value: [], options: ["Haste", "Crit", "Mastery", "Versatility"], category: "consumables", type: "hidden", gameType: "Retail"},
-    foodChoices: {value: [], options: ["Intellect Food", "None"], category: "consumables", type: "hidden", gameType: "Retail"},
+    foodChoices: {value: [], options: ["Intellect Food", "Amani Cornucopia", "None"], category: "consumables", type: "hidden", gameType: "Retail"},
     // Slot 4 is the Folio's secondary stat slot and the only one worth choosing between - see FOLIO_SLOT_SETTINGS.
     // It holds a list of pinned runes; empty is Automatic. The bare string it used to hold is still accepted,
     // since that's what already-saved profiles have (see getFolioChoices).
     folioSlot4: {value: [], options: ["Haste", "Crit", "Mastery", "Vers"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
 
     // Consumables. Only options with real modelled values are offered - see the consumables block in TopGearEngine.
-    foodBuff: {value: "Intellect Food", options: ["Intellect Food", "None"], category: "consumables", type: "selector", gameType: "Retail"},
+    foodBuff: {value: "Intellect Food", options: ["Intellect Food", "Amani Cornucopia", "None"], category: "consumables", type: "selector", gameType: "Retail"},
     weaponOil: {value: true, options: [true, false], category: "consumables", type: "selector", gameType: "Retail"},
     vantusRune: {value: true, options: [true, false], category: "consumables", type: "selector", gameType: "Retail"},
     liningUptime: { value: 60, options: [], category: "embellishments", type: "Entry", gameType: "Retail" },

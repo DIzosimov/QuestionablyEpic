@@ -924,6 +924,44 @@ describe("Flasks and food can be multi-selected", () => {
     expect(without.enchantBreakdown.food).toBeUndefined();
   });
 
+  test("Amani Cornucopia grants a secondary rather than intellect", () => {
+    // 71.5 of the player's best secondary, where the plain food gives 50 intellect. Which secondary depends on
+    // the spec's weights, so it's read from the set rather than named here.
+    const cornucopia = run(cfg({ foodChoices: ["Amani Cornucopia"] })).itemSet;
+    const intellect = run(cfg({ foodChoices: ["Intellect Food"] })).itemSet;
+    const none = run(cfg({ foodChoices: ["None"] })).itemSet;
+
+    expect(cornucopia.enchantBreakdown.food).toEqual("Amani Cornucopia");
+    expect(cornucopia.setStats.intellect).toEqual(none.setStats.intellect);
+    expect(intellect.setStats.intellect).toBeGreaterThan(none.setStats.intellect);
+
+    const secondaries = ["haste", "crit", "mastery", "versatility"];
+    const gained = secondaries.filter((stat) => cornucopia.setStats[stat] > none.setStats[stat]);
+    expect(gained.length).toEqual(1);
+    // Slightly under the raw 71.5 - secondaries pass through diminishing returns on the way into the set.
+    const gain = cornucopia.setStats[gained[0]] - none.setStats[gained[0]];
+    expect(gain).toBeLessThanOrEqual(71.5);
+    expect(gain).toBeGreaterThan(65);
+  });
+
+  test("an unrecognised food falls back to the plain intellect one", () => {
+    // Stale local storage shouldn't cost the player their food buff entirely.
+    const stale = run(cfg({ foodChoices: ["Feast of Nothing"] })).itemSet;
+    const intellect = run(cfg({ foodChoices: ["Intellect Food"] })).itemSet;
+
+    expect(stale.enchantBreakdown.food).toEqual("Intellect Food");
+    expect(stale.setStats.intellect).toEqual(intellect.setStats.intellect);
+  });
+
+  test("searching food finds the better of the two", () => {
+    const searched = run(cfg({ foodChoices: ["Intellect Food", "Amani Cornucopia"] }));
+    const best = Math.max(run(cfg({ foodChoices: ["Intellect Food"] })).itemSet.setHPS,
+                          run(cfg({ foodChoices: ["Amani Cornucopia"] })).itemSet.setHPS);
+
+    expect(searched.itemSet.setHPS).toEqual(best);
+    expect(["Intellect Food", "Amani Cornucopia"]).toContain(searched.itemSet.enchantBreakdown.food);
+  });
+
   test("multi-selecting evaluates more sets and picks a flask that was offered", () => {
     const single = run(cfg({ flaskChoices: ["Crit"] }));
     const searched = run(cfg({ flaskChoices: ["Crit", "Haste", "Mastery", "Versatility"] }));

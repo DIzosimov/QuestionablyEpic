@@ -293,7 +293,7 @@ export default function GearOptionsSelector(props: any) {
                   { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Every flask grants the same amount, so only the stat differs." })}
           {select("Food", settingValue("foodChoices", []) || [], (v) => updateSetting("foodChoices", v),
                   CONSUMABLE_OPTIONS.food.map((food) => ({ value: food, label: food })),
-                  { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Only Intellect Food is modelled so far." })}
+                  { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Amani Cornucopia gives your best secondary instead of intellect." })}
         </>
       ))}
 

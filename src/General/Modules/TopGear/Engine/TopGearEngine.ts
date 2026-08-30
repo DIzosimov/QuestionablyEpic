@@ -327,7 +327,18 @@ export function getEnchantSearchSpace(userSettings: any, spec: string): any {
 // straight yes/no until more of it is modelled.
 export const CONSUMABLE_OPTIONS: { [key: string]: string[] } = {
   flask: ["Haste", "Crit", "Mastery", "Versatility"],
-  food: ["Intellect Food", "None"],
+  food: ["Intellect Food", "Amani Cornucopia", "None"],
+};
+
+/**
+ * What each food grants. A stat of "bestSecondary" is resolved per spec at evaluation time rather than being
+ * pinned here, since which secondary that is depends on the player's weights.
+ *
+ * Adding a food is a row here plus a name in CONSUMABLE_OPTIONS - no other code needs to change.
+ */
+export const FOOD_BUFFS: { [name: string]: { stat: string; amount: number } } = {
+  "Intellect Food": { stat: "intellect", amount: 50 },
+  "Amani Cornucopia": { stat: "bestSecondary", amount: 71.5 },
 };
 
 const CONSUMABLE_SETTINGS: { [key: string]: string } = { flask: "flaskChoices", food: "foodChoices" };
@@ -1113,6 +1124,8 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   // ==== Consumables ====
   // =====================
   const consumableStats: Stats = {};
+  // The player's highest weighted secondary. Both the automatic flask and the secondary-stat foods follow it.
+  const bestSecondary = getHighestWeight(castModel);
   // == Flask ==
   let selectedChoice = "";
   // getSetting returns 0 when the setting is missing (stale local storage, an engine test that passes a partial
@@ -1120,13 +1133,11 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   // A variant's flask wins, then a single pinned flask, then the settings panel's own dropdown.
   const flaskChoice = getChosenConsumable(userSettings, "flask", consumableOverride) || getSetting(userSettings, "flaskChoice");
   if (typeof flaskChoice !== "string" || !flaskChoice || flaskChoice === "Automatic") {
-    const bestStat = getHighestWeight(castModel);
-
-    if ((setStats[bestStat] + bonus_stats[bestStat]) > 28000) {
+    if ((setStats[bestSecondary] + bonus_stats[bestSecondary]) > 28000) {
       // We are in second DR already, try and swap. Currently unused.
     }
-    consumableStats[bestStat] = (consumableStats[bestStat] || 0) + 165;
-    selectedChoice = bestStat;
+    consumableStats[bestSecondary] = (consumableStats[bestSecondary] || 0) + 165;
+    selectedChoice = bestSecondary;
   }
   else {
     selectedChoice = flaskChoice.toLowerCase();
@@ -1138,11 +1149,17 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   else if (selectedChoice === "crit") enchants.flask = "Flask of the Shattered Sun";
   else if (selectedChoice === "versatility") enchants.flask = "Flask of Thalassian Resistance";
 
-  // Food buff. Only the standard intellect food is modelled - add more here as values become available.
+  // Food buff. See FOOD_BUFFS for what each one grants.
   const foodChoice = getChosenConsumable(userSettings, "food", consumableOverride) || getSetting(userSettings, "foodBuff");
   if (foodChoice !== "None") {
-    consumableStats.intellect = (consumableStats.intellect ?? 0) + 50;
-    enchants.food = "Intellect Food";
+    // An unrecognised food (stale local storage) falls back to the plain intellect food, which is what every
+    // profile got before there was more than one, rather than silently costing the player the buff entirely.
+    const foodName = FOOD_BUFFS[foodChoice] ? foodChoice : "Intellect Food";
+    const food = FOOD_BUFFS[foodName];
+    const stat = food.stat === "bestSecondary" ? bestSecondary : food.stat;
+
+    consumableStats[stat] = (consumableStats[stat] ?? 0) + food.amount;
+    enchants.food = foodName;
   }
 
   // Weapon Oil

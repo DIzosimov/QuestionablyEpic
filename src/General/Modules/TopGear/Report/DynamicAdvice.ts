@@ -54,6 +54,11 @@ export const getDynamicAdvice = (report : any, strippedPlayer: any, contentType:
     if (topSet.enchantBreakdown["flask"]) {
         advice.push("Recommended Flask: " + topSet.enchantBreakdown["flask"] + ".");
     }
+    // Worth stating now that food is a real choice rather than a single option - a set that wins on the strength
+    // of a different food would otherwise never say so.
+    if (topSet.enchantBreakdown["food"]) {
+        advice.push("Recommended Food: " + topSet.enchantBreakdown["food"] + ".");
+    }
     /*if (isNaN(topSet.hardScore)) {
         advice.push("Something might have gone wrong with this set. Sorry about that. Results might be dicey or inaccurate. It's been automatically reported.")
     }*/ // This information is not currently stored.
