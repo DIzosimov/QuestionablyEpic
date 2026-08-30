@@ -18,7 +18,7 @@ import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngine
 import Item from "General/Items/Item";
 import { gemDB, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
 import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
-import { getFolioEffect, getFolioGems } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getFolioEffect, getFolioGems, buildFolioCombinations } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
  * == Top Gear Engine ==
@@ -330,16 +330,22 @@ export function buildEnchantCombinations(enchantChoices: any, cap: number = MAX_
   return combinations;
 }
 
-/** Pairs every gem loadout with every enchant combination, capped so a run stays finite. */
-export function buildSetVariants(gemLoadouts: number[][], enchantCombos: any[], cap: number = MAX_SET_VARIANTS) {
+/**
+ * Pairs every gem loadout with every enchant combination and every Folio combination, capped so a run stays finite.
+ * An empty list on any axis means that axis isn't being searched and the engine's own pick stands for it.
+ */
+export function buildSetVariants(gemLoadouts: number[][], enchantCombos: any[], folioCombos: any[] = [], cap: number = MAX_SET_VARIANTS) {
   const gems = gemLoadouts.length > 0 ? gemLoadouts : [null];
   const enchants = enchantCombos.length > 0 ? enchantCombos : [null];
-  const variants: { gemLoadout: number[] | null; enchantOverride: any }[] = [];
+  const folios = folioCombos.length > 0 ? folioCombos : [null];
+  const variants: { gemLoadout: number[] | null; enchantOverride: any; folioOverride: any }[] = [];
 
   for (const gemLoadout of gems) {
     for (const enchantOverride of enchants) {
-      if (variants.length >= cap) return variants;
-      variants.push({ gemLoadout, enchantOverride });
+      for (const folioOverride of folios) {
+        if (variants.length >= cap) return variants;
+        variants.push({ gemLoadout, enchantOverride, folioOverride });
+      }
     }
   }
   return variants;
@@ -460,19 +466,29 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // variants, each of which is a complete, wearable configuration ranked alongside every other set.
   const enchantChoiceSetting = getGearOption(userSettings, "enchantChoices", {});
   const enchantCombos = buildEnchantCombinations(enchantChoiceSetting, variantLimit);
-  const variants = buildSetVariants(gemLoadouts, enchantCombos.length > 1 ? enchantCombos : [], variantLimit);
+
+  // Folio runes are multi-selectable on the same terms. A single pinned rune per slot needs no expansion - it's
+  // applied straight from the settings inside getFolioGems - so only a genuine multi-select becomes variants.
+  const folioCombos = buildFolioCombinations(userSettings, variantLimit);
+
+  const variants = buildSetVariants(gemLoadouts,
+                                    enchantCombos.length > 1 ? enchantCombos : [],
+                                    folioCombos.length > 1 ? folioCombos : [],
+                                    variantLimit);
 
   for (var i = 0; i < itemSets.length; i++) {
     if (variants.length > 1) {
       variants.forEach((variant) => {
-        resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0, variant.gemLoadout || undefined, variant.enchantOverride || undefined));
+        resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
+                                variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined));
       });
     }
     else {
       const only = variants[0];
       resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
                               only && only.gemLoadout ? only.gemLoadout : undefined,
-                              only && only.enchantOverride ? only.enchantOverride : undefined));
+                              only && only.enchantOverride ? only.enchantOverride : undefined,
+                              only && only.folioOverride ? only.folioOverride : undefined));
     }
   }
 
@@ -921,7 +937,7 @@ export function getTopGearGems(gemID: number, gemCount: number, bonus_stats: Sta
  * @param {*} castModel
  * @returns 
  */
-function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any) {
+function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any, folioOverride?: any) {
   // == Setup ==
     const statBreakdown = {
     gear: {},
@@ -1121,8 +1137,9 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
 
 
   // Omnium Folio. Slots 1, 4 and 5 are selectable; anything left on Automatic resolves to the rune the engine
-  // used to hardcode, so an untouched profile produces an identical set.
-  const folioGems = getFolioGems(userSettings, getHighestWeight(castModel));
+  // used to hardcode, so an untouched profile produces an identical set. When several runes are pinned for a slot
+  // the run is expanded into variants and each one arrives here as a folioOverride.
+  const folioGems = getFolioGems(userSettings, getHighestWeight(castModel), folioOverride);
 
 
   const folioStats = getFolioEffect(folioGems, {player: player, contentType: contentType, settings: userSettings, setStats: setStats, castModel: castModel, setVariables: setVariables});

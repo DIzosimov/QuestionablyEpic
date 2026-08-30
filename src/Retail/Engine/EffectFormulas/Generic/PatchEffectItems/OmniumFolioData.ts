@@ -42,7 +42,8 @@ export const getFolioIcon = (id: number) => {
 }
 
 // The Folio has five rune slots. Slots 2 and 3 currently have a single option each, so only 1, 4 and 5 are
-// configurable. Each setting accepts "Automatic" (keep the engine's own pick) or a rune's shortName.
+// configurable. Each setting accepts "Automatic" (keep the engine's own pick), a rune's shortName, or a list of
+// shortNames - selecting several expands the run into one variant per combination, the same as gems and enchants.
 export const FOLIO_SLOT_SETTINGS: { [slot: number]: string } = { 1: "folioSlot1", 4: "folioSlot4", 5: "folioSlot5" };
 
 // The rune the engine falls back to when a slot is left on Automatic and there is no stat-weight rule for it.
@@ -61,20 +62,67 @@ export const getFolioOptions = (slot: number): string[] => {
 };
 
 /**
+ * The runes the player has pinned for one slot. An empty list means Automatic.
+ *
+ * Tolerates the bare string the setting held before multi-select, which is still what older profiles have sitting
+ * in local storage, so upgrading doesn't silently drop someone's existing pick.
+ */
+export const getFolioChoices = (settings: any, slot: number): string[] => {
+  const settingKey = FOLIO_SLOT_SETTINGS[slot];
+  if (!settingKey) return [];
+  // Reads as Automatic while the detailed gear options toggle is off, so the runes are the engine's own pick.
+  const raw = getGearOption(settings, settingKey, "Automatic");
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.filter((choice: any) => typeof choice === "string" && choice !== "" && choice !== "Automatic");
+};
+
+/** How many Folio combinations a selection produces. 0 means nothing is pinned and there is nothing to expand. */
+export const countFolioCombinations = (settings: any): number => {
+  const counts = Object.keys(FOLIO_SLOT_SETTINGS)
+    .map((slot) => getFolioChoices(settings, Number(slot)).length)
+    .filter((n) => n > 0);
+  return counts.length === 0 ? 0 : counts.reduce((total, n) => total * n, 1);
+};
+
+/**
+ * Expands the pinned runes into every combination, each one a complete { slot: shortName } override.
+ * A slot left on Automatic contributes nothing and keeps the engine's own pick for that slot.
+ */
+export const buildFolioCombinations = (settings: any, cap: number = Infinity): any[] => {
+  const slots = Object.keys(FOLIO_SLOT_SETTINGS).map(Number).filter((slot) => getFolioChoices(settings, slot).length > 0);
+  if (slots.length === 0) return [];
+
+  let combinations: any[] = [{}];
+  slots.forEach((slot) => {
+    const next: any[] = [];
+    combinations.forEach((combo) => {
+      getFolioChoices(settings, slot).forEach((name) => {
+        if (next.length < cap) next.push({ ...combo, [slot]: name });
+      });
+    });
+    combinations = next;
+  });
+
+  return combinations;
+};
+
+/**
  * Resolves the player's Folio settings into the five rune IDs to equip.
  * Anything left on "Automatic" keeps the behaviour the engine had before the setting existed, so an untouched
  * settings object produces exactly the same set of runes it always did.
  * @param settings The player settings object.
  * @param bestStat The player's highest weighted secondary, used for the Automatic slot 4 pick.
+ * @param folioOverride One combination from buildFolioCombinations, when the run has been expanded into variants.
  */
-export const getFolioGems = (settings: any, bestStat: string): number[] => {
+export const getFolioGems = (settings: any, bestStat: string, folioOverride?: any): number[] => {
   const chosen: number[] = [];
 
   [1, 2, 3, 4, 5].forEach((slot) => {
-    const settingKey = FOLIO_SLOT_SETTINGS[slot];
-    // Reads as Automatic while the detailed gear options toggle is off, so the runes are the engine's own pick.
-    const raw = settingKey ? getGearOption(settings, settingKey, "Automatic") : "Automatic";
-    const choice = typeof raw === "string" ? raw : "Automatic";
+    const override = folioOverride ? folioOverride[slot] : undefined;
+    const choices = getFolioChoices(settings, slot);
+    // A variant names one rune per slot. Failing that a single pinned rune is used directly - but several pinned
+    // and no variant means there is no single answer, so the slot goes back to Automatic rather than guessing.
+    const choice = typeof override === "string" ? override : (choices.length === 1 ? choices[0] : "Automatic");
 
     if (choice !== "Automatic") {
       const match = omniumFolioData.find((gem) => gem.slot === slot && gem.shortName === choice);

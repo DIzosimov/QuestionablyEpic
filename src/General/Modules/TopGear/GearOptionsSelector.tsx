@@ -2,7 +2,7 @@ import React from "react";
 import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel, Checkbox, Tooltip, Chip, Switch } from "@mui/material";
 import { gemDB } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
-import { getFolioOptions } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getFolioOptions, getFolioChoices, countFolioCombinations, FOLIO_SLOT_SETTINGS } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import { countGemLoadouts, countEnchantCombinations } from "./Engine/TopGearEngine";
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -95,6 +95,29 @@ export default function GearOptionsSelector(props: any) {
     </Grid>
   );
 
+  /** Multi-select with an Automatic empty state, used by the Folio slots. Picking several expands the run. */
+  const multiDropdown = (label: string, chosen: string[], onChange: (v: string[]) => void, options: string[], helper: string) => (
+    <Grid item xs={12} sm={6} md={4} key={label}>
+      <TextField
+        select fullWidth size="small" variant="outlined" label={label}
+        SelectProps={{
+          multiple: true,
+          renderValue: (selected: any) => ((selected as string[]).length === 0 ? "Automatic" : (selected as string[]).join(", ")),
+        }}
+        value={chosen}
+        onChange={(e) => onChange((e.target.value as unknown as string[]).filter((v) => v))}
+        helperText={helper}
+      >
+        {options.map((o) => (
+          <MenuItem key={o} value={o}>
+            <Checkbox size="small" checked={chosen.indexOf(o) > -1} />
+            {o}
+          </MenuItem>
+        ))}
+      </TextField>
+    </Grid>
+  );
+
   const dropdown = (label: string, val: any, onChange: (v: any) => void, options: { value: any; label: string }[]) => (
     <Grid item xs={12} sm={6} md={4} lg={3} key={label}>
       <TextField select fullWidth size="small" variant="outlined" label={label} value={val}
@@ -133,7 +156,8 @@ export default function GearOptionsSelector(props: any) {
   const sockets = estimateSockets(selectedItems);
   const gemLoadouts = selectedGems.length > 1 ? countGemLoadouts(selectedGems.length, sockets) : 1;
   const enchantCombos = Math.max(1, countEnchantCombinations(enchantChoices));
-  const projected = gemLoadouts * enchantCombos;
+  const folioCombos = Math.max(1, countFolioCombinations(playerSettings));
+  const projected = gemLoadouts * enchantCombos * folioCombos;
   const evaluated = limit === 0 ? projected : Math.min(projected, limit);
   const truncated = projected > evaluated;
   // Past a few thousand variants every gear set is re-evaluated that many times over, which is where runs stop
@@ -157,6 +181,8 @@ export default function GearOptionsSelector(props: any) {
                 : "Gems: 1 loadout"}
               {" x "}
               {enchantCombos.toLocaleString()} enchant {enchantCombos === 1 ? "combination" : "combinations"}
+              {" x "}
+              {folioCombos.toLocaleString()} Folio {folioCombos === 1 ? "combination" : "combinations"}
               {" = "}
               <strong>{projected.toLocaleString()}</strong> variants, each evaluated against every gear set.
             </Typography>
@@ -273,14 +299,12 @@ export default function GearOptionsSelector(props: any) {
 
       {searchDepth}
 
-      {section("Omnium Folio", "Slots 2 and 3 have a single rune each, so only these are selectable.", (
+      {section("Omnium Folio", "Pick one or more runes per slot. Selecting several ranks each combination as its own set. Slots 2 and 3 have a single rune each, so only these are selectable.", (
         <>
-          {dropdown("Slot 1", value("folioSlot1", "Automatic"), (v) => updateSetting("folioSlot1", v),
-            ["Automatic"].concat(getFolioOptions(1)).map((o) => ({ value: o, label: o })))}
-          {dropdown("Slot 4", value("folioSlot4", "Automatic"), (v) => updateSetting("folioSlot4", v),
-            ["Automatic"].concat(getFolioOptions(4)).map((o) => ({ value: o, label: o })))}
-          {dropdown("Slot 5", value("folioSlot5", "Automatic"), (v) => updateSetting("folioSlot5", v),
-            ["Automatic"].concat(getFolioOptions(5)).map((o) => ({ value: o, label: o })))}
+          {[1, 4, 5].map((slot) =>
+            multiDropdown(`Slot ${slot}`, getFolioChoices(playerSettings, slot),
+                          (v) => updateSetting(FOLIO_SLOT_SETTINGS[slot], v), getFolioOptions(slot),
+                          "Leave empty for Automatic."))}
         </>
       ))}
     </Grid>

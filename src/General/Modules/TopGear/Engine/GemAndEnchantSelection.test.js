@@ -3,7 +3,7 @@ import Item from "General/Items/Item";
 import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
 import { runTopGear } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
-import { getFolioGems } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import rootReducer from "Redux/Reducers/RootReducer";
 
 /*
@@ -263,12 +263,20 @@ describe("Gems and enchants expand together", () => {
   test("variants are the product of both, capped", () => {
     const gems = [[1, 1], [2, 2]];
     const enchants = [{ Chest: "a" }, { Chest: "b" }, { Chest: "c" }];
-    expect(buildSetVariants(gems, enchants, 100).length).toEqual(6);
-    expect(buildSetVariants(gems, enchants, 4).length).toEqual(4);
+    expect(buildSetVariants(gems, enchants, [], 100).length).toEqual(6);
+    expect(buildSetVariants(gems, enchants, [], 4).length).toEqual(4);
+  });
+
+  test("Folio combinations are a third axis, multiplied in with the rest", () => {
+    const gems = [[1, 1], [2, 2]];
+    const enchants = [{ Chest: "a" }, { Chest: "b" }, { Chest: "c" }];
+    const folios = [{ 4: "Crit" }, { 4: "Haste" }];
+    expect(buildSetVariants(gems, enchants, folios, 100).length).toEqual(12);
+    expect(buildSetVariants([], [], folios, 100).length).toEqual(2);
   });
 
   test("neither selected still yields exactly one variant", () => {
-    expect(buildSetVariants([], [], 10)).toEqual([{ gemLoadout: null, enchantOverride: null }]);
+    expect(buildSetVariants([], [], [], 10)).toEqual([{ gemLoadout: null, enchantOverride: null, folioOverride: null }]);
   });
 
   test("multi-selecting enchants evaluates more sets and still returns one winner", () => {
@@ -391,7 +399,7 @@ describe("Search depth is configurable", () => {
     };
     expect(buildEnchantCombinations(many, 10).length).toEqual(10);
     expect(buildEnchantCombinations(many, Infinity).length).toEqual(24);
-    expect(buildSetVariants([[A], [B]], buildEnchantCombinations(many, Infinity), Infinity).length).toEqual(48);
+    expect(buildSetVariants([[A], [B]], buildEnchantCombinations(many, Infinity), [], Infinity).length).toEqual(48);
   });
 
   test("the counting helpers agree with what the builders produce", () => {
@@ -441,5 +449,103 @@ describe("Search depth is configurable", () => {
   test("the default run is unchanged by the limit existing", () => {
     // The old behaviour was a gem cap of 12 inside a total cap of 24. Leaving the setting alone has to reproduce it.
     expect(run(cfg(wide)).itemsCompared).toEqual(24);
+  });
+});
+
+/*
+  Folio runes are multi-selectable on the same terms as gems and enchants: pin several in a slot and every
+  combination is ranked as its own set. Slots used to hold a single shortName, and profiles saved before this
+  still do, so the single-string form has to keep working.
+*/
+describe("Omnium Folio runes can be multi-selected", () => {
+  const CRIT = 1279609, HASTE = 1287774, VERS = 1279613;
+  const VOID_TOUCHED = 1279596, UNLEASHED_FIRE = 1279599;
+
+  test("an untouched profile is Automatic and expands into nothing", () => {
+    expect(getFolioChoices(cfg(), 4)).toEqual([]);
+    expect(countFolioCombinations(cfg())).toEqual(0);
+    expect(buildFolioCombinations(cfg())).toEqual([]);
+  });
+
+  test("the single-string form saved by older profiles still resolves", () => {
+    expect(getFolioChoices(cfg({ folioSlot4: "Crit" }), 4)).toEqual(["Crit"]);
+    expect(getFolioGems(cfg({ folioSlot4: "Crit" }), "haste")[3]).toEqual(CRIT);
+    // "Automatic" was the old empty state and must not be read as a rune name.
+    expect(getFolioChoices(cfg({ folioSlot4: "Automatic" }), 4)).toEqual([]);
+  });
+
+  test("one pinned rune needs no expansion and is applied directly", () => {
+    expect(buildFolioCombinations(cfg({ folioSlot4: ["Crit"] })).length).toEqual(1);
+    expect(getFolioGems(cfg({ folioSlot4: ["Crit"] }), "haste")[3]).toEqual(CRIT);
+  });
+
+  test("several pinned runes expand into one combination each", () => {
+    const combos = buildFolioCombinations(cfg({ folioSlot4: ["Crit", "Haste", "Vers"] }));
+    expect(combos.length).toEqual(3);
+    expect(combos.map((c) => c[4]).sort()).toEqual(["Crit", "Haste", "Vers"]);
+  });
+
+  test("slots multiply together, and the count agrees with the build", () => {
+    const settings = cfg({ folioSlot1: ["Unleashed Fire", "Void-Touched"], folioSlot4: ["Crit", "Haste", "Vers"] });
+    expect(countFolioCombinations(settings)).toEqual(6);
+    expect(buildFolioCombinations(settings).length).toEqual(6);
+    expect(buildFolioCombinations(settings, 4).length).toEqual(4);
+  });
+
+  test("a variant picks the rune for its slot, the rest stay Automatic", () => {
+    const settings = cfg({ folioSlot1: ["Unleashed Fire", "Void-Touched"], folioSlot4: ["Crit", "Vers"] });
+
+    expect(getFolioGems(settings, "haste", { 1: "Void-Touched", 4: "Vers" })).toEqual([VOID_TOUCHED, 1279603, 1287555, VERS, 1279614]);
+    expect(getFolioGems(settings, "haste", { 1: "Unleashed Fire", 4: "Crit" })).toEqual([UNLEASHED_FIRE, 1279603, 1287555, CRIT, 1279614]);
+  });
+
+  test("several pinned but no variant falls back to Automatic rather than guessing one", () => {
+    // Without a variant there is no single answer, so the slot must not silently take the first pick.
+    const settings = cfg({ folioSlot4: ["Crit", "Vers"] });
+    expect(getFolioGems(settings, "haste")[3]).toEqual(HASTE);
+  });
+
+  test("a stale rune name in a list falls through to Automatic", () => {
+    expect(getFolioGems(cfg({ folioSlot4: ["No Such Rune"] }), "haste")[3]).toEqual(HASTE);
+    expect(getFolioGems(cfg({ folioSlot1: ["No Such Rune"] }), "haste").length).toEqual(5);
+  });
+
+  test("the detailed toggle still gates them", () => {
+    const off = cfg({ folioSlot4: ["Crit", "Vers"], detailedGearOptions: false });
+    expect(getFolioChoices(off, 4)).toEqual([]);
+    expect(countFolioCombinations(off)).toEqual(0);
+    expect(buildFolioCombinations(off)).toEqual([]);
+  });
+
+  test("multi-selecting runes evaluates more sets and still returns one winner", () => {
+    const single = run(cfg({ folioSlot4: ["Crit"] }));
+    const multi = run(cfg({ folioSlot4: ["Crit", "Haste", "Mastery", "Vers"] }));
+
+    expect(multi.itemsCompared).toEqual(single.itemsCompared * 4);
+    expect(multi.itemSet).toBeTruthy();
+    // The winner must actually be wearing one of the runes that were offered.
+    expect([CRIT, HASTE, 1287771, VERS]).toContain(multi.itemSet.folioGems[3]);
+  });
+
+  test("offering extra runes never produces a worse winner than offering one", () => {
+    const single = run(cfg({ folioSlot4: ["Vers"] })).itemSet.setHPS;
+    const multi = run(cfg({ folioSlot4: ["Crit", "Haste", "Mastery", "Vers"] })).itemSet.setHPS;
+
+    expect(multi).toBeGreaterThanOrEqual(single);
+  });
+
+  test("runes expand alongside gems and enchants, all three at once", () => {
+    const plain = run(cfg()).itemsCompared;
+    const all = run(cfg({
+      selectedGems: [240898, 240890],
+      enchantChoices: { CombinedWeapon: ["Arcane Mastery", "Berserker's Rage"] },
+      folioSlot4: ["Crit", "Haste"],
+      gearVariantLimit: 0,
+    })).itemsCompared;
+
+    // The gem figure depends on the set's socket count, but every axis multiplies in, so the total has to be a
+    // clean multiple of the 2 enchants x 2 runes the other two contribute.
+    expect(all).toBeGreaterThan(plain);
+    expect(all % 4).toEqual(0);
   });
 });
