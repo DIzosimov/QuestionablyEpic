@@ -3,6 +3,10 @@ import { CONSTRAINTS, setBounds } from "../Engine/CONSTRAINTS";
 import { CONSTANTS } from "General/Engine/CONSTANTS";
 import { getEmbellishmentForItem } from "Databases/EmbellishmentDB";
 
+// The slots the catalyst can convert into tier. Back, Wrist, Waist and Feet are deliberately absent - there are
+// no tier pieces for them, so the conversion would have nothing to produce.
+export const CATALYZABLE_SLOTS = ["Head", "Chest", "Shoulder", "Legs", "Hands"];
+
 // The Item class represents an active item in the app at a specific item level.
 // We'll create them when we import a SimC string, or when an item is added manually.
 // Items are stored in the players character. They are not currently stored in local storage but that is a likely addition soon after release.
@@ -225,8 +229,17 @@ export class Item {
     return this.flags.includes(flag);
   }
 
+  /**
+   * Whether the catalyst can turn this into the player's tier piece.
+   *
+   * Any item in a tier slot qualifies, whatever it dropped from. The old rule also required the SimC import to
+   * have tagged the item with this season's item_conversion, which meant anything added by hand, imported without
+   * that field, or carried over from an earlier season simply had no catalyst option - the button never appeared.
+   *
+   * What still can't be converted is something that's already tier, or already been through the catalyst.
+   */
   canBeCatalyzed() {
-    return !this.setID && this.itemConversion === CONSTANTS.seasonalItemConversion && ['Head', 'Chest', 'Shoulder', 'Legs', 'Hands', /*'Back', 'Wrist',  'Waist',  'Feet'*/].includes(this.slot);
+    return !this.setID && !this.isCatalystItem && CATALYZABLE_SLOTS.includes(this.slot);
   }
 
 
@@ -262,24 +275,26 @@ export class Item {
     return this.setID !== 0 && this.setID !== "" && this.slot !== "Trinket" && this.slot !== "Finger";
   }
 
-  // Converts an item in-place to the tier set equivalent.
-  convertToTier(spec: string) {
+  /**
+   * Converts this item in place into the spec's tier piece for its slot.
+   *
+   * Only identity changes - id, name and set. Stats, item level, sockets, tertiary and any embellishment stay as
+   * they were, because that's what the catalyst does: you keep the piece you had and it gains the set bonus.
+   *
+   * @returns false if the spec has no tier piece for this slot, in which case the item is left untouched.
+   */
+  convertToTier(spec: string): boolean {
     const classTag = CONSTANTS.tierSetIDs[spec];
+    const tierPieces = getItemDB("Retail").filter((item) => item.slot === this.slot && item.itemSetId === classTag);
+    if (tierPieces.length === 0) return false;
 
-    const temp = getItemDB("Retail").filter((item) => {
-      return item.slot === this.slot && item.itemSetId === classTag;
-    });
-
-    if (temp.length > 0) {
-      // Change item ID, name, add setID, set catalyzedID to old ID. Stats can be kept.
-      const tierItem = temp[temp.length - 1]
-
-      this.catalyzedID = this.id;
-      this.id = tierItem.id;
-      this.name = tierItem.name;
-      this.setID = tierItem.itemSetId;
-
-    };
+    const tierItem = tierPieces[tierPieces.length - 1];
+    this.catalyzedID = this.id;
+    this.id = tierItem.id;
+    this.name = tierItem.name;
+    this.setID = tierItem.itemSetId;
+    this.isCatalystItem = true;
+    return true;
   }
 
   // This compiles an additional stat array into an item.

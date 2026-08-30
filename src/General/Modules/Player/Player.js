@@ -254,34 +254,36 @@ export class Player {
     item.convertToTier(this.spec);
   }
   
+  // Adds a catalyzed copy of an item alongside the original, so Top Gear can weigh the set bonus against whatever
+  // the piece was before. The copy keeps the original's stats outright - the catalyst changes what an item counts
+  // as, not what it grants.
   catalyzeItem = (originalItem) => {
     const slot = originalItem.slot;
-    const pClass = this.spec;
-    const classTag = CONSTANTS.tierSetIDs[pClass];
+    const classTag = CONSTANTS.tierSetIDs[this.spec];
 
-    const temp = getItemDB("Retail").filter(function (item) {
-      return item.slot === slot && item.itemSetId === classTag;
-    });
-
-    if (temp.length > 0) {
-      const match = temp[temp.length - 1];
-      const newItem = new Item(match.id, "", slot, originalItem.socket, originalItem.tertiary, 0, originalItem.level, "", "Retail", originalItem.id);
-      Object.assign(newItem, { isCatalystItem: true });
-      newItem.stats = originalItem.stats;
-      newItem.active = true;
-      newItem.catalyzedID = originalItem.id;
-      if (originalItem.uniqueEquip === "vault") {
-        newItem.uniqueEquip = "vault";
-        newItem.vaultItem = true;
-      }
-      if (originalItem.effect) newItem.effect = originalItem.effect;
-      newItem.quality = 4;
-      newItem.upgradeTrack = originalItem.upgradeTrack;
-      newItem.upgradeRank = originalItem.upgradeRank;
-      this.activeItems = this.activeItems.concat(newItem);
-    } else {
-      // We should probably write an error check here.
+    const tierPieces = getItemDB("Retail").filter((item) => item.slot === slot && item.itemSetId === classTag);
+    if (tierPieces.length === 0) {
+      reportError(this, "Catalyst", "No tier piece found for slot", slot + " / " + this.spec);
+      return;
     }
+
+    const match = tierPieces[tierPieces.length - 1];
+    const newItem = new Item(match.id, "", slot, originalItem.socket, originalItem.tertiary, 0, originalItem.level, "", "Retail", originalItem.id);
+    Object.assign(newItem, { isCatalystItem: true });
+    // Copied, not shared - addStats mutates in place and would otherwise reach back into the original item.
+    newItem.stats = { ...originalItem.stats };
+    newItem.active = true;
+    newItem.catalyzedID = originalItem.id;
+    if (originalItem.uniqueEquip === "vault") {
+      newItem.uniqueEquip = "vault";
+      newItem.vaultItem = true;
+    }
+    if (originalItem.effect) newItem.effect = originalItem.effect;
+    newItem.quality = 4;
+    newItem.upgradeTrack = originalItem.upgradeTrack;
+    newItem.upgradeRank = originalItem.upgradeRank;
+    newItem.gemString = originalItem.gemString;
+    this.activeItems = this.activeItems.concat(newItem);
   };
 
   // Options: Convert to Vault, Add socket, change item level.
