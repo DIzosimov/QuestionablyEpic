@@ -266,20 +266,21 @@ describe("Gems and enchants expand together", () => {
   test("variants are the product of both, capped", () => {
     const gems = [[1, 1], [2, 2]];
     const enchants = [{ Chest: "a" }, { Chest: "b" }, { Chest: "c" }];
-    expect(buildSetVariants(gems, enchants, [], 100).length).toEqual(6);
-    expect(buildSetVariants(gems, enchants, [], 4).length).toEqual(4);
+    expect(buildSetVariants({ gemLoadouts: gems, enchantCombos: enchants }, 100).length).toEqual(6);
+    expect(buildSetVariants({ gemLoadouts: gems, enchantCombos: enchants }, 4).length).toEqual(4);
   });
 
-  test("Folio combinations are a third axis, multiplied in with the rest", () => {
+  test("Folio and consumable combinations are further axes, multiplied in with the rest", () => {
     const gems = [[1, 1], [2, 2]];
     const enchants = [{ Chest: "a" }, { Chest: "b" }, { Chest: "c" }];
     const folios = [{ 4: "Crit" }, { 4: "Haste" }];
-    expect(buildSetVariants(gems, enchants, folios, 100).length).toEqual(12);
-    expect(buildSetVariants([], [], folios, 100).length).toEqual(2);
+    expect(buildSetVariants({ gemLoadouts: gems, enchantCombos: enchants, folioCombos: folios }, 100).length).toEqual(12);
+    expect(buildSetVariants({ folioCombos: folios }, 100).length).toEqual(2);
+    expect(buildSetVariants({ folioCombos: folios, consumableCombos: [{ flask: "Crit" }, { flask: "Haste" }] }, 100).length).toEqual(4);
   });
 
   test("neither selected still yields exactly one variant", () => {
-    expect(buildSetVariants([], [], [], 10)).toEqual([{ gemLoadout: null, enchantOverride: null, folioOverride: null }]);
+    expect(buildSetVariants({}, 10)).toEqual([{ gemLoadout: null, enchantOverride: null, folioOverride: null, consumableOverride: null }]);
   });
 
   test("multi-selecting enchants evaluates more sets and still returns one winner", () => {
@@ -402,7 +403,7 @@ describe("Search depth is configurable", () => {
     };
     expect(buildEnchantCombinations(many, 10).length).toEqual(10);
     expect(buildEnchantCombinations(many, Infinity).length).toEqual(24);
-    expect(buildSetVariants([[A], [B]], buildEnchantCombinations(many, Infinity), [], Infinity).length).toEqual(48);
+    expect(buildSetVariants({ gemLoadouts: [[A], [B]], enchantCombos: buildEnchantCombinations(many, Infinity) }, Infinity).length).toEqual(48);
   });
 
   test("the counting helpers agree with what the builders produce", () => {
@@ -863,5 +864,91 @@ describe("Each ring is enchanted separately", () => {
 
     expect(ringSwaps.length).toBeGreaterThan(0);
     ringSwaps.forEach((swap) => expect(["Finger1", "Finger2"]).toContain(swap.slot));
+  });
+});
+
+/*
+  Flasks and food. Both are searchable on the same terms as everything else, but with one difference: leaving them
+  empty falls back to the single dropdown in the settings panel rather than to an engine default, so the simple
+  path keeps working exactly as it did.
+*/
+const { getConsumableSearchSpace, countConsumableCombinations, buildConsumableCombinations,
+        CONSUMABLE_OPTIONS } = require("./TopGearEngine");
+
+describe("Flasks and food can be multi-selected", () => {
+  test("an untouched profile searches neither and expands into nothing", () => {
+    expect(getConsumableSearchSpace(cfg())).toEqual({});
+    expect(countConsumableCombinations(cfg())).toEqual(0);
+    expect(buildConsumableCombinations(cfg())).toEqual([]);
+  });
+
+  test("the settings panel's single choice still drives an unpinned run", () => {
+    const crit = run(cfg({ flaskChoice: "Crit" })).itemSet;
+    const haste = run(cfg({ flaskChoice: "Haste" })).itemSet;
+
+    expect(crit.enchantBreakdown.flask).toEqual("Flask of the Shattered Sun");
+    expect(haste.enchantBreakdown.flask).toEqual("Flask of the Blood Knights");
+    expect(crit.setStats.crit - haste.setStats.crit).toBeGreaterThan(0);
+  });
+
+  test("one pinned flask needs no expansion and is applied directly", () => {
+    expect(buildConsumableCombinations(cfg({ flaskChoices: ["Mastery"] })).length).toEqual(1);
+    expect(run(cfg({ flaskChoices: ["Mastery"] })).itemSet.enchantBreakdown.flask).toEqual("Flask of the Magisters");
+  });
+
+  test("a pinned flask overrides the settings panel's choice", () => {
+    const r = run(cfg({ flaskChoice: "Crit", flaskChoices: ["Versatility"] }));
+    expect(r.itemSet.enchantBreakdown.flask).toEqual("Flask of Thalassian Resistance");
+  });
+
+  test("several pinned flasks expand into one combination each", () => {
+    const combos = buildConsumableCombinations(cfg({ flaskChoices: ["Crit", "Haste", "Mastery"] }));
+    expect(combos.length).toEqual(3);
+    expect(combos.map((c) => c.flask).sort()).toEqual(["Crit", "Haste", "Mastery"]);
+  });
+
+  test("flask and food multiply together", () => {
+    const settings = cfg({ flaskChoices: ["Crit", "Haste"], foodChoices: ["Intellect Food", "None"] });
+    expect(countConsumableCombinations(settings)).toEqual(4);
+    expect(buildConsumableCombinations(settings).length).toEqual(4);
+    expect(buildConsumableCombinations(settings, 3).length).toEqual(3);
+  });
+
+  test("food genuinely changes the set it's on", () => {
+    const withFood = run(cfg({ foodChoices: ["Intellect Food"] })).itemSet;
+    const without = run(cfg({ foodChoices: ["None"] })).itemSet;
+
+    // Not exactly the flat 50 the food grants - intellect is multiplied by buffs and talents afterwards.
+    expect(withFood.setStats.intellect - without.setStats.intellect).toBeGreaterThan(0);
+    expect(withFood.enchantBreakdown.food).toEqual("Intellect Food");
+    expect(without.enchantBreakdown.food).toBeUndefined();
+  });
+
+  test("multi-selecting evaluates more sets and picks a flask that was offered", () => {
+    const single = run(cfg({ flaskChoices: ["Crit"] }));
+    const searched = run(cfg({ flaskChoices: ["Crit", "Haste", "Mastery", "Versatility"] }));
+
+    expect(searched.itemsCompared).toEqual(single.itemsCompared * 4);
+    expect(searched.itemSet.setHPS).toBeGreaterThanOrEqual(single.itemSet.setHPS);
+    expect(["Flask of the Shattered Sun", "Flask of the Blood Knights",
+            "Flask of the Magisters", "Flask of Thalassian Resistance"]).toContain(searched.itemSet.enchantBreakdown.flask);
+  });
+
+  test("several pinned but no variant leaves the settings panel's choice standing", () => {
+    // There's no single answer without a variant, so it must not silently take the first pick.
+    expect(run(cfg({ flaskChoice: "Crit", flaskChoices: ["Haste", "Mastery"] })).itemsCompared).toBeGreaterThan(0);
+    expect(buildConsumableCombinations(cfg({ flaskChoices: ["Haste", "Mastery"] })).length).toEqual(2);
+  });
+
+  test("the detailed toggle gates them", () => {
+    const off = cfg({ flaskChoices: ["Crit", "Haste"], detailedGearOptions: false });
+    expect(getConsumableSearchSpace(off)).toEqual({});
+    expect(countConsumableCombinations(off)).toEqual(0);
+  });
+
+  test("Optimize Everything searches every flask and both food states", () => {
+    const all = cfg({ detailedGearOptions: false, optimizeAllGearOptions: true });
+    expect(getConsumableSearchSpace(all)).toEqual(CONSUMABLE_OPTIONS);
+    expect(countConsumableCombinations(all)).toEqual(CONSUMABLE_OPTIONS.flask.length * CONSUMABLE_OPTIONS.food.length);
   });
 });

@@ -323,27 +323,78 @@ export function getEnchantSearchSpace(userSettings: any, spec: string): any {
   return pinnedSlots(everything);
 }
 
+// The consumables that are a real choice. Flasks all grant the same amount so only the stat differs; food is a
+// straight yes/no until more of it is modelled.
+export const CONSUMABLE_OPTIONS: { [key: string]: string[] } = {
+  flask: ["Haste", "Crit", "Mastery", "Versatility"],
+  food: ["Intellect Food", "None"],
+};
+
+const CONSUMABLE_SETTINGS: { [key: string]: string } = { flask: "flaskChoices", food: "foodChoices" };
+
+/** The flasks and food a run will try. Empty on an axis means the single choice in the settings panel stands. */
+export function getConsumableSearchSpace(userSettings: any): any {
+  if (isOptimizeAllGear(userSettings)) return { ...CONSUMABLE_OPTIONS };
+
+  const pinned: { [key: string]: string[] } = {};
+  Object.keys(CONSUMABLE_SETTINGS).forEach((key) => {
+    const choice = getGearOption(userSettings, CONSUMABLE_SETTINGS[key], []);
+    pinned[key] = Array.isArray(choice) ? choice : [choice];
+  });
+  return pinnedSlots(pinned);
+}
+
+export const countConsumableCombinations = (userSettings: any): number =>
+  countChoiceCombinations(getConsumableSearchSpace(userSettings));
+
+export const buildConsumableCombinations = (userSettings: any, cap: number = Infinity): any[] =>
+  buildChoiceCombinations(getConsumableSearchSpace(userSettings), cap);
+
+/**
+ * The flask or food this evaluation is using, or null to fall back to the settings panel's single choice.
+ * A variant names one. Failing that a single pinned option is used directly - but several pinned and no variant
+ * means there's no single answer, so the panel's choice stands rather than us guessing at one.
+ */
+function getChosenConsumable(userSettings: any, key: string, consumableOverride?: any): string | null {
+  if (consumableOverride && consumableOverride[key]) return consumableOverride[key];
+
+  const pinned = getGearOption(userSettings, CONSUMABLE_SETTINGS[key], []);
+  return Array.isArray(pinned) && pinned.length === 1 ? pinned[0] : null;
+}
+
 export const countEnchantCombinations = (enchantChoices: any): number => countChoiceCombinations(enchantChoices);
 
 /** Expands the player's per-slot enchant selections into every combination. Empty slots keep the engine's pick. */
 export const buildEnchantCombinations = (enchantChoices: any, cap: number = MAX_SET_VARIANTS): any[] =>
   buildChoiceCombinations(pinnedSlots(enchantChoices), cap);
 
-/**
- * Pairs every gem loadout with every enchant combination and every Folio combination, capped so a run stays finite.
- * An empty list on any axis means that axis isn't being searched and the engine's own pick stands for it.
- */
-export function buildSetVariants(gemLoadouts: number[][], enchantCombos: any[], folioCombos: any[] = [], cap: number = MAX_SET_VARIANTS) {
-  const gems = gemLoadouts.length > 0 ? gemLoadouts : [null];
-  const enchants = enchantCombos.length > 0 ? enchantCombos : [null];
-  const folios = folioCombos.length > 0 ? folioCombos : [null];
-  const variants: { gemLoadout: number[] | null; enchantOverride: any; folioOverride: any }[] = [];
+/** One complete, wearable configuration for a set. A null axis means the engine's own pick stands for it. */
+export type SetVariant = {
+  gemLoadout: number[] | null;
+  enchantOverride: any;
+  folioOverride: any;
+  consumableOverride: any;
+};
 
-  for (const gemLoadout of gems) {
-    for (const enchantOverride of enchants) {
-      for (const folioOverride of folios) {
-        if (variants.length >= cap) return variants;
-        variants.push({ gemLoadout, enchantOverride, folioOverride });
+/**
+ * Crosses every axis of the search with every other, capped so a run stays finite.
+ *
+ * Axes are passed by name rather than position because there are four of them now and adding a fifth shouldn't
+ * mean touching every caller. An empty list on any axis means that axis isn't being searched at all.
+ */
+export function buildSetVariants(axes: {
+  gemLoadouts?: number[][]; enchantCombos?: any[]; folioCombos?: any[]; consumableCombos?: any[];
+} = {}, cap: number = MAX_SET_VARIANTS): SetVariant[] {
+  const orNothing = (list?: any[]) => (list && list.length > 0 ? list : [null]);
+  const variants: SetVariant[] = [];
+
+  for (const gemLoadout of orNothing(axes.gemLoadouts)) {
+    for (const enchantOverride of orNothing(axes.enchantCombos)) {
+      for (const folioOverride of orNothing(axes.folioCombos)) {
+        for (const consumableOverride of orNothing(axes.consumableCombos)) {
+          if (variants.length >= cap) return variants;
+          variants.push({ gemLoadout, enchantOverride, folioOverride, consumableOverride });
+        }
       }
     }
   }
@@ -481,17 +532,23 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // applied straight from the settings inside getFolioGems - so only a genuine multi-select becomes variants.
   const folioCombos = buildFolioCombinations(userSettings, variantLimit);
 
-  const variants = buildSetVariants(gemLoadouts,
-                                    enchantCombos.length > 1 ? enchantCombos : [],
-                                    folioCombos.length > 1 ? folioCombos : [],
-                                    variantLimit);
+  // Flasks and food are searchable on the same terms. A single pinned choice needs no expansion - it's read
+  // straight from the settings - so only a genuine multi-select becomes variants.
+  const consumableCombos = buildConsumableCombinations(userSettings, variantLimit);
+
+  const variants = buildSetVariants({
+    gemLoadouts,
+    enchantCombos: enchantCombos.length > 1 ? enchantCombos : [],
+    folioCombos: folioCombos.length > 1 ? folioCombos : [],
+    consumableCombos: consumableCombos.length > 1 ? consumableCombos : [],
+  }, variantLimit);
 
   // Optimize Everything is a "just find me the best" switch, so the engine's own automatic pick has to be one of
   // the candidates. A capped search keeps the first N combinations in build order, not the best N, so without this
   // it can rank below the plain run it was supposed to improve on. Costs one variant; we drop the last to pay.
   if (isOptimizeAllGear(userSettings) && variants.length > 1) {
     if (variants.length >= variantLimit) variants.pop();
-    variants.unshift({ gemLoadout: null, enchantOverride: null, folioOverride: null });
+    variants.unshift({ gemLoadout: null, enchantOverride: null, folioOverride: null, consumableOverride: null });
   }
 
   // Evaluations, not sets: with variants a single set is scored once per configuration, and that multiplier is
@@ -504,7 +561,8 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   for (var i = 0; i < itemSets.length; i++) {
     variants.forEach((variant) => {
       resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
-                              variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined));
+                              variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined,
+                              variant.consumableOverride || undefined));
       if (++evaluated % reportEvery === 0) report({ stage: "Evaluating sets", done: evaluated, total: totalEvaluations });
     });
   }
@@ -983,7 +1041,7 @@ export function getTopGearGems(gemID: number, gemCount: number, bonus_stats: Sta
  * @param {*} castModel
  * @returns 
  */
-function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any, folioOverride?: any) {
+function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any, folioOverride?: any, consumableOverride?: any) {
   // == Setup ==
     const statBreakdown = {
     gear: {},
@@ -1059,7 +1117,8 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   let selectedChoice = "";
   // getSetting returns 0 when the setting is missing (stale local storage, an engine test that passes a partial
   // settings object), so treat anything that isn't a usable string as Automatic rather than crashing the whole run.
-  const flaskChoice = getSetting(userSettings, "flaskChoice");
+  // A variant's flask wins, then a single pinned flask, then the settings panel's own dropdown.
+  const flaskChoice = getChosenConsumable(userSettings, "flask", consumableOverride) || getSetting(userSettings, "flaskChoice");
   if (typeof flaskChoice !== "string" || !flaskChoice || flaskChoice === "Automatic") {
     const bestStat = getHighestWeight(castModel);
 
@@ -1080,7 +1139,8 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   else if (selectedChoice === "versatility") enchants.flask = "Flask of Thalassian Resistance";
 
   // Food buff. Only the standard intellect food is modelled - add more here as values become available.
-  if (getSetting(userSettings, "foodBuff") !== "None") {
+  const foodChoice = getChosenConsumable(userSettings, "food", consumableOverride) || getSetting(userSettings, "foodBuff");
+  if (foodChoice !== "None") {
     consumableStats.intellect = (consumableStats.intellect ?? 0) + 50;
     enchants.food = "Intellect Food";
   }

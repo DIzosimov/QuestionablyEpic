@@ -69,6 +69,10 @@ const initialState : RootState = {
     // How far the gem x enchant expansion is allowed to run. 0 means no limit - every combination is evaluated,
     // which is exhaustive but grows fast, so the panel shows the projected count before a run.
     gearVariantLimit: {value: 24, options: [24, 60, 150, 500, 2000, 0], category: "gems", type: "hidden", gameType: "Retail"},
+    // Flasks and food are searchable too. Empty means the single choice in the consumables settings below stands,
+    // which is what an untouched profile has, so nothing changes until the player pins something.
+    flaskChoices: {value: [], options: ["Haste", "Crit", "Mastery", "Versatility"], category: "consumables", type: "hidden", gameType: "Retail"},
+    foodChoices: {value: [], options: ["Intellect Food", "None"], category: "consumables", type: "hidden", gameType: "Retail"},
     // Slot 4 is the Folio's secondary stat slot and the only one worth choosing between - see FOLIO_SLOT_SETTINGS.
     // It holds a list of pinned runes; empty is Automatic. The bare string it used to hold is still accepted,
     // since that's what already-saved profiles have (see getFolioChoices).

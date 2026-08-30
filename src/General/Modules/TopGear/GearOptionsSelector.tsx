@@ -3,7 +3,8 @@ import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel
 import { getCurrentStatGems, getCurrentMetaGems } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
 import { getFolioOptions, getFolioChoices, countFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
-import { countGemLoadouts, countEnchantCombinations, getGemSearchSpace, getEnchantSearchSpace, normaliseEnchantChoices } from "./Engine/TopGearEngine";
+import { countGemLoadouts, countEnchantCombinations, getGemSearchSpace, getEnchantSearchSpace, normaliseEnchantChoices,
+         countConsumableCombinations, CONSUMABLE_OPTIONS } from "./Engine/TopGearEngine";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*        Gem, enchant and Omnium Folio selection. Sits with item selection, not in settings.      */
@@ -165,7 +166,8 @@ export default function GearOptionsSelector(props: any) {
   const gemLoadoutCount = searchedGems.length > 1 ? countGemLoadouts(searchedGems.length, sockets) : 1;
   const enchantComboCount = Math.max(1, countEnchantCombinations(getEnchantSearchSpace(playerSettings, spec)));
   const folioComboCount = Math.max(1, countFolioCombinations(playerSettings));
-  const projected = gemLoadoutCount * enchantComboCount * folioComboCount;
+  const consumableComboCount = Math.max(1, countConsumableCombinations(playerSettings));
+  const projected = gemLoadoutCount * enchantComboCount * folioComboCount * consumableComboCount;
   const evaluated = variantLimit === 0 ? projected : Math.min(projected, variantLimit);
   // Past a few thousand every gear set is re-evaluated that many times over, which is where runs stop being slow
   // and start being unusable. Worth saying out loud before the player presses the button.
@@ -189,7 +191,8 @@ export default function GearOptionsSelector(props: any) {
                 ? `${searchedGems.length} gems across ${sockets || "?"} sockets = ${plural(gemLoadoutCount, "loadout")}`
                 : "1 gem loadout"}
               {` x ${plural(enchantComboCount, "enchant combination")}`}
-              {` x ${plural(folioComboCount, "Folio combination")} = `}
+              {` x ${plural(folioComboCount, "Folio combination")}`}
+              {` x ${plural(consumableComboCount, "consumable combination")} = `}
               <strong>{projected.toLocaleString()}</strong> variants, each evaluated against every gear set.
             </Typography>
             <Typography variant="caption" style={{ color: projected > evaluated ? "#f0c674" : "#8fbf6f", display: "block" }}>
@@ -281,6 +284,17 @@ export default function GearOptionsSelector(props: any) {
             </Grid>
           );
         })
+      ))}
+
+      {!detailed ? null : section("Consumables", "Pick one or more and each is ranked as its own set. Leave empty to use the single choice in Settings.", (
+        <>
+          {select("Flask", settingValue("flaskChoices", []) || [], (v) => updateSetting("flaskChoices", v),
+                  CONSUMABLE_OPTIONS.flask.map((flask) => ({ value: flask, label: flask })),
+                  { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Every flask grants the same amount, so only the stat differs." })}
+          {select("Food", settingValue("foodChoices", []) || [], (v) => updateSetting("foodChoices", v),
+                  CONSUMABLE_OPTIONS.food.map((food) => ({ value: food, label: food })),
+                  { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Only Intellect Food is modelled so far." })}
+        </>
       ))}
 
       {!detailed ? null : section("Omnium Folio", "The secondary stat rune is the only one worth choosing - the rest are picked for you. Select several and each is ranked as its own set.", (
