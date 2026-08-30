@@ -63,6 +63,9 @@ const initialState : RootState = {
     selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
     replaceExistingGems: {value: true, options: [true, false], category: "gems", type: "hidden", gameType: "Retail"},
     enchantChoices: {value: {}, options: [], category: "enchants", type: "hidden", gameType: "Retail"},
+    // How far the gem x enchant expansion is allowed to run. 0 means no limit - every combination is evaluated,
+    // which is exhaustive but grows fast, so the panel shows the projected count before a run.
+    gearVariantLimit: {value: 24, options: [24, 60, 150, 500, 2000, 0], category: "gems", type: "hidden", gameType: "Retail"},
     folioSlot1: {value: "Automatic", options: ["Automatic", "Unleashed Fire", "Void-Touched"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
     folioSlot4: {value: "Automatic", options: ["Automatic", "Haste", "Crit", "Mastery", "Vers"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
     folioSlot5: {value: "Automatic", options: ["Automatic", "Overload", "Residual Energy", "Echoes"], category: "omniumFolio", type: "hidden", gameType: "Retail"},

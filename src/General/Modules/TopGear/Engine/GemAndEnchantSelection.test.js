@@ -346,3 +346,100 @@ describe("The detailed gear options toggle gates the whole section", () => {
     expect(getGearOption(cfg(), "noSuchOption", "Automatic")).toEqual("Automatic");
   });
 });
+
+/*
+  Search depth. The cap on how far a run expands is a setting, not a constant, so a player hunting the genuinely
+  optimal setup can ask for the full combinatorics instead of a truncated search. The default has to stay exactly
+  where it was, and the counting helpers the panel projects with have to agree with what the builders produce.
+*/
+const { resolveVariantLimit, countGemLoadouts, countEnchantCombinations } = require("./TopGearEngine");
+
+describe("Search depth is configurable", () => {
+  const A = 240898, B = 240890, C = 240914;
+
+  test("an untouched profile keeps the old default", () => {
+    expect(base.gearVariantLimit.value).toEqual(24);
+    expect(resolveVariantLimit(cfg())).toEqual(24);
+  });
+
+  test("zero means no limit", () => {
+    expect(resolveVariantLimit(cfg({ gearVariantLimit: 0 }))).toEqual(Infinity);
+  });
+
+  test("the settings panel's string form is accepted, and nonsense falls back to the default", () => {
+    expect(resolveVariantLimit(cfg({ gearVariantLimit: "150" }))).toEqual(150);
+    expect(resolveVariantLimit(cfg({ gearVariantLimit: "0" }))).toEqual(Infinity);
+    expect(resolveVariantLimit(cfg({ gearVariantLimit: "banana" }))).toEqual(24);
+    expect(resolveVariantLimit(cfg({ gearVariantLimit: -5 }))).toEqual(24);
+  });
+
+  test("the limit is ignored while the detailed toggle is off", () => {
+    expect(resolveVariantLimit(cfg({ gearVariantLimit: 0, detailedGearOptions: false }))).toEqual(24);
+  });
+
+  test("no limit builds every gem loadout instead of the capped 12", () => {
+    // 3 gems over 8 sockets is C(10,8) = 45 distinct multisets, well past the default cap.
+    expect(buildGemLoadouts([A, B, C], 8, 12).length).toEqual(12);
+    expect(buildGemLoadouts([A, B, C], 8, Infinity).length).toEqual(45);
+  });
+
+  test("no limit builds every enchant combination", () => {
+    const many = {
+      Chest: ["Mark of the Worldsoul", "Mark of the Magister"],
+      CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"],
+      Finger: ["Nature's Fury", "Zul'jin's Mastery", "Silvermoon's Alacrity", "Silvermoon's Tenacity"],
+    };
+    expect(buildEnchantCombinations(many, 10).length).toEqual(10);
+    expect(buildEnchantCombinations(many, Infinity).length).toEqual(24);
+    expect(buildSetVariants([[A], [B]], buildEnchantCombinations(many, Infinity), Infinity).length).toEqual(48);
+  });
+
+  test("the counting helpers agree with what the builders produce", () => {
+    // This is the whole point of them - the panel projects a count without paying to build the list.
+    [[1, 5], [2, 3], [3, 3], [3, 8], [4, 6]].forEach(([gemCount, sockets]) => {
+      const gems = [A, B, C, 240905].slice(0, gemCount);
+      expect(countGemLoadouts(gemCount, sockets)).toEqual(buildGemLoadouts(gems, sockets, Infinity).length);
+    });
+
+    expect(countGemLoadouts(0, 8)).toEqual(0);
+    expect(countGemLoadouts(3, 0)).toEqual(0);
+
+    const choices = { Chest: ["a", "b"], Finger: ["c", "d", "e"] };
+    expect(countEnchantCombinations(choices)).toEqual(buildEnchantCombinations(choices, Infinity).length);
+    expect(countEnchantCombinations({})).toEqual(0);
+    expect(countEnchantCombinations(null)).toEqual(0);
+  });
+
+  // Enough selections that the default cap genuinely bites: 24 enchant combinations times a handful of gem
+  // loadouts is far past 24 variants, so the capped run is searching a fraction of the space.
+  const wide = {
+    selectedGems: [A, B, C],
+    enchantChoices: {
+      Chest: ["Mark of the Worldsoul", "Mark of the Magister"],
+      CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"],
+      Finger: ["Nature's Fury", "Zul'jin's Mastery", "Silvermoon's Alacrity", "Silvermoon's Tenacity"],
+    },
+  };
+
+  test("raising the limit evaluates strictly more sets, and no limit the most of all", () => {
+    const capped = run(cfg(wide)).itemsCompared;
+    const wider = run(cfg({ ...wide, gearVariantLimit: 150 })).itemsCompared;
+    const unlimited = run(cfg({ ...wide, gearVariantLimit: 0 })).itemsCompared;
+
+    expect(wider).toBeGreaterThan(capped);
+    expect(unlimited).toBeGreaterThan(wider);
+  });
+
+  test("a wider search never returns a worse set than the capped one", () => {
+    // The point of paying for the extra variants: the winner can only improve.
+    const capped = run(cfg(wide)).itemSet.setHPS;
+    const unlimited = run(cfg({ ...wide, gearVariantLimit: 0 })).itemSet.setHPS;
+
+    expect(unlimited).toBeGreaterThanOrEqual(capped);
+  });
+
+  test("the default run is unchanged by the limit existing", () => {
+    // The old behaviour was a gem cap of 12 inside a total cap of 24. Leaving the setting alone has to reproduce it.
+    expect(run(cfg(wide)).itemsCompared).toEqual(24);
+  });
+});

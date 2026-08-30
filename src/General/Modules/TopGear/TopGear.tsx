@@ -809,7 +809,7 @@ export default function TopGear(props: any) {
 
         {gameType === "Retail" ? (
           <Grid item xs={12}>
-            <GearOptionsSelector playerSettings={playerSettings} updateSetting={updateGearOption} spec={props.player.spec} />
+            <GearOptionsSelector playerSettings={playerSettings} updateSetting={updateGearOption} spec={props.player.spec} selectedItems={props.player.getSelectedItems()} />
           </Grid>
         ) : null}
         {gameType === "Classic" && getSetting(playerSettings, "reforgeSetting") === "Manual"? 

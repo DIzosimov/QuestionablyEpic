@@ -3,6 +3,7 @@ import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel
 import { gemDB } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
 import { getFolioOptions } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { countGemLoadouts, countEnchantCombinations } from "./Engine/TopGearEngine";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*        Gem, enchant and Omnium Folio selection. Sits with item selection, not in settings.      */
@@ -13,6 +14,11 @@ import { getFolioOptions } from "Retail/Engine/EffectFormulas/Generic/PatchEffec
 // The whole section is behind a Detailed toggle. Off - which is the default - Top Gear looks and behaves exactly
 // as it did before any of this existed, and the engine ignores these settings entirely (see getGearOption), so a
 // profile that was configured once can't keep steering later runs from a panel the player has collapsed.
+//
+// Multi-selecting gems and enchants expands a run into one variant per combination, and the total is multiplicative,
+// so it's capped. The cap is a setting rather than a constant: "No limit" runs the full combinatorics, which is what
+// you want when hunting the genuinely optimal setup and can't accept a truncated search. Because that's easy to make
+// unrunnable by accident, the panel projects the real count from the current selection before the run happens.
 
 const SLOT_LABELS: { [key: string]: string } = {
   Head: "Head", Shoulder: "Shoulder", Chest: "Chest", Legs: "Legs",
@@ -31,8 +37,39 @@ const gemLabel = (gem: any) => {
   return `${gem.name}${stats ? " (" + stats + ")" : ""}`;
 };
 
+// Slots that appear twice in a set, so both of their sockets count toward the total.
+const DOUBLE_SLOTS = ["Finger", "Trinket"];
+
+/**
+ * Upper bound on the sockets a built set can have, from the items the player has selected.
+ *
+ * The engine works this out per set; here we can only take the best-socketed item in each slot, which is the same
+ * number the engine's own maxSockets lands on. It's an estimate purely so the projection below is honest about
+ * scale - the run itself never uses it.
+ */
+const estimateSockets = (selectedItems: any[]) => {
+  const bySlot: { [slot: string]: number[] } = {};
+  (selectedItems || []).forEach((item: any) => {
+    if (!item || !item.socket) return;
+    (bySlot[item.slot] = bySlot[item.slot] || []).push(item.socket);
+  });
+  return Object.keys(bySlot).reduce((total, slot) => {
+    const sorted = bySlot[slot].sort((a, b) => b - a);
+    return total + sorted.slice(0, DOUBLE_SLOTS.indexOf(slot) > -1 ? 2 : 1).reduce((n, s) => n + s, 0);
+  }, 0);
+};
+
+const VARIANT_LIMITS = [
+  { value: 24, label: "Balanced - 24 (default)" },
+  { value: 60, label: "Wider - 60" },
+  { value: 150, label: "Deep - 150" },
+  { value: 500, label: "Very deep - 500" },
+  { value: 2000, label: "Exhaustive - 2000" },
+  { value: 0, label: "No limit - every combination" },
+];
+
 export default function GearOptionsSelector(props: any) {
-  const { playerSettings, updateSetting, spec } = props;
+  const { playerSettings, updateSetting, spec, selectedItems } = props;
 
   const value = (key: string, fallback: any) =>
     playerSettings && playerSettings[key] !== undefined ? playerSettings[key].value : fallback;
@@ -90,6 +127,56 @@ export default function GearOptionsSelector(props: any) {
     </Grid>
   );
 
+  /* ------------------------------- Search depth and its projection ------------------------------ */
+  // Every number here is the same arithmetic the engine does, so what's shown is what will actually run.
+  const limit = Number(value("gearVariantLimit", 24));
+  const sockets = estimateSockets(selectedItems);
+  const gemLoadouts = selectedGems.length > 1 ? countGemLoadouts(selectedGems.length, sockets) : 1;
+  const enchantCombos = Math.max(1, countEnchantCombinations(enchantChoices));
+  const projected = gemLoadouts * enchantCombos;
+  const evaluated = limit === 0 ? projected : Math.min(projected, limit);
+  const truncated = projected > evaluated;
+  // Past a few thousand variants every gear set is re-evaluated that many times over, which is where runs stop
+  // being slow and start being unusable. Worth saying out loud before the player presses the button.
+  const heavy = evaluated > 2000;
+
+  const searchDepth = (
+    <Grid item xs={12}>
+      <Paper elevation={0} style={{ backgroundColor: "rgba(28,28,28,0.5)", padding: 10 }}>
+        <Typography variant="subtitle1" color="primary">Search depth</Typography>
+        <Typography variant="caption" style={{ color: "rgba(255,255,255,0.55)", display: "block", marginBottom: 6 }}>
+          How many gem and enchant combinations a run is allowed to evaluate. No limit is a full, exhaustive search.
+        </Typography>
+        <Divider style={{ borderColor: "rgba(255,255,255,0.12)", marginBottom: 10 }} />
+        <Grid container spacing={1} alignItems="center">
+          {dropdown("Combinations evaluated", limit, (v) => updateSetting("gearVariantLimit", Number(v)), VARIANT_LIMITS)}
+          <Grid item xs={12} sm={12} md={8}>
+            <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)", display: "block" }}>
+              {selectedGems.length > 1
+                ? `${selectedGems.length} gems across ${sockets || "?"} sockets = ${gemLoadouts.toLocaleString()} loadouts`
+                : "Gems: 1 loadout"}
+              {" x "}
+              {enchantCombos.toLocaleString()} enchant {enchantCombos === 1 ? "combination" : "combinations"}
+              {" = "}
+              <strong>{projected.toLocaleString()}</strong> variants, each evaluated against every gear set.
+            </Typography>
+            <Typography variant="caption" style={{ color: truncated ? "#f0c674" : "#8fbf6f", display: "block" }}>
+              {truncated
+                ? `Only ${evaluated.toLocaleString()} of them will run - raise the limit to search all ${projected.toLocaleString()}.`
+                : `All ${projected.toLocaleString()} will run.`}
+            </Typography>
+            {heavy ? (
+              <Typography variant="caption" style={{ color: "#e06c6c", display: "block" }}>
+                That is a very large search and can take a long time, or hang the page. Consider narrowing the item
+                list first, then widening the search on the shortlist.
+              </Typography>
+            ) : null}
+          </Grid>
+        </Grid>
+      </Paper>
+    </Grid>
+  );
+
   if (!detailed) return <Grid container spacing={1} style={{ marginTop: 4 }}>{toggleBar}</Grid>;
 
   return (
@@ -125,10 +212,6 @@ export default function GearOptionsSelector(props: any) {
             </TextField>
           </Grid>
           <Grid item xs={12}>
-            <Typography variant="caption" style={{ color: "#f0c674", display: "block", marginBottom: 4 }}>
-              Selecting several gems and enchants multiplies the sets evaluated. The expansion is capped, so past a
-              point extra selections are ignored rather than making the run crawl.
-            </Typography>
             <Tooltip placement="right" title={
               <Typography variant="caption">
                 Unticked, gems you already have socketed are kept and only empty sockets get filled — so the result
@@ -187,6 +270,8 @@ export default function GearOptionsSelector(props: any) {
           );
         })
       ))}
+
+      {searchDepth}
 
       {section("Omnium Folio", "Slots 2 and 3 have a single rune each, so only these are selectable.", (
         <>

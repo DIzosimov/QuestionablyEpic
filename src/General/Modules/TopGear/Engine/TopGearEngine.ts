@@ -262,9 +262,48 @@ export function buildGemLoadouts(selectedGems: number[], sockets: number, cap: n
   return loadouts;
 }
 
-// Total gem x enchant variants a single run will expand into. Every variant re-evaluates every gear set, so this
-// is what stops a handful of multi-selects turning into a run that never finishes.
+// Default number of gem x enchant variants a single run expands into. Every variant re-evaluates every gear set,
+// so the default is deliberately modest - but it's only a default. gearVariantLimit raises it, and a limit of 0
+// removes it entirely for an exhaustive search (see resolveVariantLimit).
 const MAX_SET_VARIANTS = 24;
+
+/**
+ * The number of variants this run is allowed to expand into.
+ *
+ * A limit of 0 means "no limit" and returns Infinity, which switches the builders below from a truncated search to
+ * full combinatorics. That is genuinely exhaustive and genuinely slow: the count is multiplicative, and every
+ * variant re-evaluates every gear set, so the panel projects the total before the player commits to a run.
+ */
+export function resolveVariantLimit(userSettings: any): number {
+  const raw = getGearOption(userSettings, "gearVariantLimit", MAX_SET_VARIANTS);
+  // The settings panel writes number fields through as strings.
+  const limit = typeof raw === "string" ? parseInt(raw, 10) : raw;
+  if (typeof limit !== "number" || isNaN(limit) || limit < 0) return MAX_SET_VARIANTS;
+  return limit === 0 ? Infinity : limit;
+}
+
+/**
+ * How many distinct gem loadouts a selection produces, without building them.
+ *
+ * Sockets are interchangeable, so this is combinations with repetition: C(gems + sockets - 1, sockets). The panel
+ * uses it to show the real cost of an exhaustive run, which is the whole reason it's worth computing separately
+ * from buildGemLoadouts - counting is cheap where building the list is not.
+ */
+export function countGemLoadouts(gemCount: number, sockets: number): number {
+  if (gemCount <= 0 || sockets <= 0) return 0;
+  if (gemCount === 1) return 1;
+  let total = 1;
+  for (let i = 1; i <= sockets; i++) total = (total * (gemCount - 1 + i)) / i;
+  return Math.round(total);
+}
+
+/** How many enchant combinations a selection produces, without building them. */
+export function countEnchantCombinations(enchantChoices: any): number {
+  if (!enchantChoices || typeof enchantChoices !== "object") return 0;
+  const slots = Object.keys(enchantChoices).filter((slot) => Array.isArray(enchantChoices[slot]) && enchantChoices[slot].length > 0);
+  if (slots.length === 0) return 0;
+  return slots.reduce((total, slot) => total * enchantChoices[slot].length, 1);
+}
 
 /**
  * Expands the player's per-slot enchant selections into every distinct combination.
@@ -410,13 +449,18 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // Sockets are only known per set, but they're bounded, so build loadouts against the largest set and let each
   // evaluation take the slice it needs.
   const maxSockets = itemSets.reduce((most: number, set: ItemSet) => Math.max(most, set.itemList.reduce((n: number, item: Item) => n + (item.socket || 0), 0)), 0);
-  const gemLoadouts = selectedGems.length > 1 ? buildGemLoadouts(selectedGems, maxSockets) : [];
+  const variantLimit = resolveVariantLimit(userSettings);
+  // Gems keep their own, tighter default cap - the gem spread is worth a fraction of a percent, so it isn't worth
+  // spending the whole variant budget on. Raising the limit past the default raises this too, since a player
+  // widening the search wants it widened for gems as well.
+  const gemCap = variantLimit > MAX_SET_VARIANTS ? variantLimit : MAX_GEM_LOADOUTS;
+  const gemLoadouts = selectedGems.length > 1 ? buildGemLoadouts(selectedGems, maxSockets, gemCap) : [];
 
   // Enchants can be multi-selected per slot too. Gems and enchants are expanded together into a single list of
   // variants, each of which is a complete, wearable configuration ranked alongside every other set.
   const enchantChoiceSetting = getGearOption(userSettings, "enchantChoices", {});
-  const enchantCombos = buildEnchantCombinations(enchantChoiceSetting);
-  const variants = buildSetVariants(gemLoadouts, enchantCombos.length > 1 ? enchantCombos : []);
+  const enchantCombos = buildEnchantCombinations(enchantChoiceSetting, variantLimit);
+  const variants = buildSetVariants(gemLoadouts, enchantCombos.length > 1 ? enchantCombos : [], variantLimit);
 
   for (var i = 0; i < itemSets.length; i++) {
     if (variants.length > 1) {
