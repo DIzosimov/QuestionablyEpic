@@ -9,9 +9,10 @@ type GemEntry = {
   }
 
 // The current tier's stat gems grant this split: the major stat at GEM_MAJOR_STAT, the minor at GEM_MINOR_STAT.
-// Kept here so the engine's gem lookup and any future tier update only have to change in one place.
+// The rows below use these rather than repeating the numbers, so a tier update is one edit and the engine's gem
+// lookup can't drift out of step with the data it's searching.
 export const GEM_MAJOR_STAT = 16;
-export const GEM_MINOR_STAT = 9;
+export const GEM_MINOR_STAT = 7;
 
 // Current-expansion gems. Metas are kept apart from the stat gems because they aren't interchangeable with them:
 // a set has exactly one meta socket, and it's the only socket a meta can go in.
@@ -44,84 +45,84 @@ export const gemDB: GemEntry[] = [
       element: "Lapis",
       name: "Flawless Deadly Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_blue",
-      stats: { versatility: 16, crit: 9 },
+      stats: { versatility: GEM_MAJOR_STAT, crit: GEM_MINOR_STAT },
     },
     {
       id: 240918,
       element: "Lapis",
       name: "Flawless Masterful Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_blue",
-      stats: { versatility: 16, mastery: 9 },
+      stats: { versatility: GEM_MAJOR_STAT, mastery: GEM_MINOR_STAT },
     },
     {
       id: 240916,
       element: "Lapis",
       name: "Flawless Quick Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_blue",
-      stats: { versatility: 16, haste: 9 },
+      stats: { versatility: GEM_MAJOR_STAT, haste: GEM_MINOR_STAT },
     },
     {
       id: 240910,
       element: "Garnet",
       name: "Flawless Versatile Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_red",
-      stats: { crit: 16, versatility: 9 },
+      stats: { crit: GEM_MAJOR_STAT, versatility: GEM_MINOR_STAT },
     },
     {
       id: 240906,
       element: "Garnet",
       name: "Flawless Quick Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_red",
-      stats: { crit: 16, haste: 9 },
+      stats: { crit: GEM_MAJOR_STAT, haste: GEM_MINOR_STAT },
     },
     {
       id: 240908,
       element: "Garnet",
       name: "Flawless Masterful Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_red",
-      stats: { crit: 16, mastery: 9 },
+      stats: { crit: GEM_MAJOR_STAT, mastery: GEM_MINOR_STAT },
     },
     {
       id: 240902,
       element: "Amethyst",
       name: "Flawless Versatile Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_purple",
-      stats: { mastery: 16, versatility: 9 },
+      stats: { mastery: GEM_MAJOR_STAT, versatility: GEM_MINOR_STAT },
     },
     {
       id: 240900,
       element: "Amethyst",
       name: "Flawless Quick Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_purple",
-      stats: { mastery: 16, haste: 9 },
+      stats: { mastery: GEM_MAJOR_STAT, haste: GEM_MINOR_STAT },
     },
     {
       id: 240898,
       element: "Amethyst",
       name: "Flawless Deadly Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_purple",
-      stats: { mastery: 16, crit: 9 },
+      stats: { mastery: GEM_MAJOR_STAT, crit: GEM_MINOR_STAT },
     },
     {
       id: 240894,
       element: "Peridot",
       name: "Flawless Versatile Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_green",
-      stats: { haste: 16, versatility: 9 },
+      stats: { haste: GEM_MAJOR_STAT, versatility: GEM_MINOR_STAT },
     },
      {
       id: 240892,
       element: "Peridot",
       name: "Flawless Masterful Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_green",
-      stats: { haste: 16, mastery: 9 },
+      stats: { haste: GEM_MAJOR_STAT, mastery: GEM_MINOR_STAT },
     },
       {
       id: 240890,
       element: "Peridot",
       name: "Flawless Deadly Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_green",
-      stats: { haste: 16, crit: 9 },
+      stats: { haste: GEM_MAJOR_STAT, crit: GEM_MINOR_STAT },
     },
     {
       id: 213488,

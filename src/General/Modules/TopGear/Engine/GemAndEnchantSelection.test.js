@@ -697,3 +697,37 @@ describe("A run reports its progress", () => {
     expect(runWithProgress(settings).result.itemSet.setHPS).toEqual(run(settings).itemSet.setHPS);
   });
 });
+
+/*
+  The gem stat split. GEM_MAJOR_STAT / GEM_MINOR_STAT are what the engine's gem lookup searches by, so if they
+  ever disagree with the rows in GemDB the lookup silently finds nothing and falls back to a placeholder gem.
+  That's exactly how the split sat wrong at 16/9 for a while, so it's pinned here.
+*/
+const { GEM_MAJOR_STAT, GEM_MINOR_STAT } = require("Databases/GemDB");
+
+describe("Current tier gems are a 16 / 7 split", () => {
+  const GEM_LOOKUP_FALLBACK = 213482; // What getGemID returns when it can't find a match.
+
+  test("the constants are the split the tier actually grants", () => {
+    expect(GEM_MAJOR_STAT).toEqual(16);
+    expect(GEM_MINOR_STAT).toEqual(7);
+  });
+
+  test("every current stat gem grants exactly that split", () => {
+    const gems = getCurrentStatGems();
+    expect(gems.length).toBeGreaterThan(0);
+
+    gems.forEach((gem) => {
+      const amounts = Object.values(gem.stats);
+      expect(amounts.length).toEqual(2);
+      expect(amounts.sort((a, b) => b - a)).toEqual([GEM_MAJOR_STAT, GEM_MINOR_STAT]);
+    });
+  });
+
+  test("the engine's lookup finds real gems, not the fallback", () => {
+    // A run socketing the fallback means the constants and the rows have drifted apart.
+    const socketed = run(cfg()).itemSet.enchantBreakdown["Gems"];
+    expect(socketed.length).toBeGreaterThan(0);
+    expect(socketed).not.toContain(GEM_LOOKUP_FALLBACK);
+  });
+});
