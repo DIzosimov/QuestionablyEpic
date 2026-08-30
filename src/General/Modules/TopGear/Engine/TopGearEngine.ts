@@ -7,7 +7,7 @@ import Player from "../../Player/Player";
 import CastModel from "../../Player/CastModel";
 import { getEffectValue } from "../../../../Retail/Engine/EffectFormulas/EffectEngine";
 import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished, getGearOption,
-         buildChoiceCombinations, countChoiceCombinations, pinnedSlots } from "General/Engine/ItemUtilities";
+         buildChoiceCombinations, countChoiceCombinations, pinnedSlots, isOptimizeAllGear } from "General/Engine/ItemUtilities";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTrinketValue } from "Retail/Engine/EffectFormulas/Generic/Trinkets/TrinketEffectFormulas";
 import { allRamps, allRampsHealing, getDefaultDiscTalents } from "General/Modules/Player/ClassDefaults/DisciplinePriest/DiscRampUtilities";
@@ -17,8 +17,8 @@ import { CONSTANTS, MODEL_TYPES } from "General/Engine/CONSTANTS";
 import { getCircletEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/CyrcesCircletData"
 import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngineShared"
 import Item from "General/Items/Item";
-import { gemDB, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
-import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
+import { gemDB, getCurrentStatGems, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
+import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
 import { getFolioEffect, getFolioGems, buildFolioCombinations } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
@@ -178,8 +178,8 @@ function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes
   // Stat sockets take, in order of preference: the loadout this variant is evaluating, the player's single pinned
   // gem, or the engine's own pick. Meta is socket 0 and is chosen separately, being interchangeable with nothing.
   const loadout = gemLoadout && gemLoadout.length > 0 ? gemLoadout : null;
-  const pinnedGems = getGearOption(userSettings, "selectedGems", []);
-  const pinnedFiller = Array.isArray(pinnedGems) && pinnedGems.length === 1 && pinnedGems[0] > 0 ? pinnedGems[0] : null;
+  const searchedGems = getGemSearchSpace(userSettings);
+  const pinnedFiller = searchedGems.length === 1 ? searchedGems[0] : null;
   const pinnedMeta = getGearOption(userSettings, "selectedMetaGem", 0);
 
   const buildAutomatic = () => {
@@ -283,6 +283,29 @@ export function countGemLoadouts(gemCount: number, sockets: number): number {
   let total = 1;
   for (let i = 1; i <= sockets; i++) total = (total * (gemCount - 1 + i)) / i;
   return Math.round(total);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                          Search spaces                                          */
+/* ---------------------------------------------------------------------------------------------- */
+// What a run will actually search, as opposed to what the player pinned. Normally those are the same thing, but
+// "Optimize Everything" replaces the pins with every option there is. Exported so the gear panel can project the
+// real cost of a run from the same numbers the engine will use.
+
+/** The gems a run will try in each stat socket. */
+export function getGemSearchSpace(userSettings: any): number[] {
+  if (isOptimizeAllGear(userSettings)) return getCurrentStatGems().map((gem) => gem.id);
+  const pinned = getGearOption(userSettings, "selectedGems", []);
+  return Array.isArray(pinned) ? pinned.filter((gem: number) => gem > 0) : [];
+}
+
+/** The enchants a run will try in each slot. */
+export function getEnchantSearchSpace(userSettings: any, spec: string): any {
+  if (!isOptimizeAllGear(userSettings)) return pinnedSlots(getGearOption(userSettings, "enchantChoices", {}));
+
+  const everything: { [slot: string]: string[] } = {};
+  ENCHANTABLE_SLOTS.forEach((slot) => { everything[slot] = getEnchantsForSlot(slot, spec).map((enchant) => enchant.id); });
+  return pinnedSlots(everything);
 }
 
 export const countEnchantCombinations = (enchantChoices: any): number => countChoiceCombinations(enchantChoices);
@@ -410,8 +433,7 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // Selecting several gems expands each set into one candidate per gem loadout, which are then ranked together -
   // the same way selecting two rings gives you two candidate sets. Selecting one (or none) leaves this at a
   // single evaluation per set, exactly as before.
-  const selectedGemsSetting = getGearOption(userSettings, "selectedGems", []);
-  const selectedGems: number[] = Array.isArray(selectedGemsSetting) ? selectedGemsSetting.filter((g: number) => g > 0) : [];
+  const searchedGems = getGemSearchSpace(userSettings);
 
   // Sockets are only known per set, but they're bounded, so build loadouts against the largest set and let each
   // evaluation take the slice it needs.
@@ -420,12 +442,11 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // Raising the limit past the default raises the gem cap too - a player widening the search wants it widened
   // for gems as well, not just for enchants.
   const gemCap = variantLimit > MAX_SET_VARIANTS ? variantLimit : MAX_GEM_LOADOUTS;
-  const gemLoadouts = selectedGems.length > 1 ? buildGemLoadouts(selectedGems, maxSockets, gemCap) : [];
+  const gemLoadouts = searchedGems.length > 1 ? buildGemLoadouts(searchedGems, maxSockets, gemCap) : [];
 
   // Enchants can be multi-selected per slot too. Gems and enchants are expanded together into a single list of
   // variants, each of which is a complete, wearable configuration ranked alongside every other set.
-  const enchantChoiceSetting = getGearOption(userSettings, "enchantChoices", {});
-  const enchantCombos = buildEnchantCombinations(enchantChoiceSetting, variantLimit);
+  const enchantCombos = buildEnchantCombinations(getEnchantSearchSpace(userSettings, player.spec), variantLimit);
 
   // Folio runes are multi-selectable on the same terms. A single pinned rune per slot needs no expansion - it's
   // applied straight from the settings inside getFolioGems - so only a genuine multi-select becomes variants.
@@ -435,6 +456,14 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
                                     enchantCombos.length > 1 ? enchantCombos : [],
                                     folioCombos.length > 1 ? folioCombos : [],
                                     variantLimit);
+
+  // Optimize Everything is a "just find me the best" switch, so the engine's own automatic pick has to be one of
+  // the candidates. A capped search keeps the first N combinations in build order, not the best N, so without this
+  // it can rank below the plain run it was supposed to improve on. Costs one variant; we drop the last to pay.
+  if (isOptimizeAllGear(userSettings) && variants.length > 1) {
+    if (variants.length >= variantLimit) variants.pop();
+    variants.unshift({ gemLoadout: null, enchantOverride: null, folioOverride: null });
+  }
 
   for (var i = 0; i < itemSets.length; i++) {
     if (variants.length > 1) {

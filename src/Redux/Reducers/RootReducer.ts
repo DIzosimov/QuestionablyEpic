@@ -59,6 +59,9 @@ const initialState : RootState = {
     // detailedGearOptions gates the whole section: off, the engine ignores every setting below and Top Gear runs
     // exactly as it did before they existed.
     detailedGearOptions: {value: false, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
+    // Optimise everything instead of pinning it: Top Gear searches every gem, enchant and Folio rune itself. This
+    // one lives in the settings panel rather than the gear panel, since it's a "do it all for me" switch.
+    optimizeAllGearOptions: {value: false, options: [true, false], category: "topGear", type: "selector", gameType: "Retail"},
     selectedGems: {value: [], options: [], category: "gems", type: "hidden", gameType: "Retail"},
     selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
     replaceExistingGems: {value: true, options: [true, false], category: "gems", type: "hidden", gameType: "Retail"},

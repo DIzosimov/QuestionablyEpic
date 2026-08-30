@@ -1393,15 +1393,23 @@ function sumObjectsByKey<T extends Record<string | number, number>>(objs: T[]): 
 // Automatic default, so a profile configured once and then switched back to the simple view can't keep steering
 // later runs from a panel the player has collapsed.
 
-export function isDetailedGearOptions(userSettings: any): boolean {
-  const toggle = userSettings && typeof userSettings === "object" ? userSettings.detailedGearOptions : null;
-  // The settings panel writes checkbox values straight through, so tolerate the string form.
-  return !!toggle && (toggle.value === true || toggle.value === "true");
-}
+// The settings panel writes checkbox and dropdown values straight through, so tolerate the string form.
+const isOn = (userSettings: any, key: string) => {
+  const setting = userSettings && typeof userSettings === "object" ? userSettings[key] : null;
+  return !!setting && (setting.value === true || setting.value === "true");
+};
 
-/** Reads one of the detailed gear options, or its Automatic fallback while the toggle is off. */
+export const isDetailedGearOptions = (userSettings: any): boolean => isOn(userSettings, "detailedGearOptions");
+
+/**
+ * Optimise everything: instead of the player pinning options, Top Gear searches every gem, enchant and Folio rune
+ * alongside its normal gear search and ranks the lot. Implies the detailed options, since it drives them.
+ */
+export const isOptimizeAllGear = (userSettings: any): boolean => isOn(userSettings, "optimizeAllGearOptions");
+
+/** Reads one of the detailed gear options, or its Automatic fallback while both toggles are off. */
 export function getGearOption(userSettings: any, key: string, fallback: any): any {
-  if (!isDetailedGearOptions(userSettings)) return fallback;
+  if (!isDetailedGearOptions(userSettings) && !isOptimizeAllGear(userSettings)) return fallback;
   const setting = userSettings[key];
   return setting && setting.value !== undefined ? setting.value : fallback;
 }

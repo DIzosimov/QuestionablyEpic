@@ -13,6 +13,17 @@ type GemEntry = {
 export const GEM_MAJOR_STAT = 16;
 export const GEM_MINOR_STAT = 9;
 
+// Current-expansion gems. Metas are kept apart from the stat gems because they aren't interchangeable with them:
+// a set has exactly one meta socket, and it's the only socket a meta can go in.
+const isCurrentGem = (gem: GemEntry) => gem.id >= 240000 && gem.id < 250000;
+export const isMetaGem = (gem: GemEntry) => gem.element === "Meta" || gem.name.includes("Diamond");
+
+// GemDB has a couple of duplicated rows, so de-dupe before either list is offered to the player or searched.
+const uniqueById = (gems: GemEntry[]) => gems.filter((gem, i) => gems.findIndex((other) => other.id === gem.id) === i);
+
+export const getCurrentStatGems = (): GemEntry[] => uniqueById(gemDB.filter((gem) => isCurrentGem(gem) && !isMetaGem(gem)));
+export const getCurrentMetaGems = (): GemEntry[] => uniqueById(gemDB.filter((gem) => isCurrentGem(gem) && isMetaGem(gem)));
+
 export const gemDB: GemEntry[] = [
     {
       id: 240969,

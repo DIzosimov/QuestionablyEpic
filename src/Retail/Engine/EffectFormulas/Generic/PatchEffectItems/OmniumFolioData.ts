@@ -1,7 +1,7 @@
 import { convertPPMToUptime, processedValue, runGenericPPMTrinket, 
     getHighestStat, getLowestStat, runGenericOnUseTrinket, getDiminishedValue, runDiscOnUseTrinket, runGenericFlatProc } from "Retail/Engine/EffectFormulas/EffectUtilities";
     
-import { compileStats, getEstimatedHPS, getGearOption, buildChoiceCombinations, countChoiceCombinations } from "General/Engine/ItemUtilities"
+import { compileStats, getEstimatedHPS, getGearOption, buildChoiceCombinations, countChoiceCombinations, isOptimizeAllGear } from "General/Engine/ItemUtilities"
 
 import Player from "General/Modules/Player/Player";
 
@@ -76,18 +76,25 @@ export const getFolioChoices = (settings: any, slot: number): string[] => {
   return pinned.filter((rune: any) => typeof rune === "string" && rune !== "" && rune !== "Automatic");
 };
 
-/** The pinned runes keyed by slot, which is the shape the shared combination helpers expect. */
-const pinnedRunes = (settings: any) => {
+/**
+ * The runes a run will actually try in a slot: every one of them under "Optimize Everything", otherwise whatever
+ * the player pinned. Kept apart from getFolioChoices so the panel can still show the pins as pins.
+ */
+export const getFolioSearchSpace = (settings: any, slot: number): string[] =>
+  isOptimizeAllGear(settings) ? getFolioOptions(slot) : getFolioChoices(settings, slot);
+
+/** The search space keyed by slot, which is the shape the shared combination helpers expect. */
+const searchSpaceBySlot = (settings: any) => {
   const bySlot: { [slot: string]: string[] } = {};
-  Object.keys(FOLIO_SLOT_SETTINGS).forEach((slot) => { bySlot[slot] = getFolioChoices(settings, Number(slot)); });
+  Object.keys(FOLIO_SLOT_SETTINGS).forEach((slot) => { bySlot[slot] = getFolioSearchSpace(settings, Number(slot)); });
   return bySlot;
 };
 
-export const countFolioCombinations = (settings: any): number => countChoiceCombinations(pinnedRunes(settings));
+export const countFolioCombinations = (settings: any): number => countChoiceCombinations(searchSpaceBySlot(settings));
 
-/** Expands the pinned runes into every combination, each a complete { slot: shortName } override. */
+/** Expands the runes on offer into every combination, each a complete { slot: shortName } override. */
 export const buildFolioCombinations = (settings: any, cap: number = Infinity): any[] =>
-  buildChoiceCombinations(pinnedRunes(settings), cap);
+  buildChoiceCombinations(searchSpaceBySlot(settings), cap);
 
 /**
  * Resolves the player's Folio settings into the five rune IDs to equip.

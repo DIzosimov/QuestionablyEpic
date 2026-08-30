@@ -1,9 +1,9 @@
 import React from "react";
 import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel, Checkbox, Tooltip, Chip, Switch } from "@mui/material";
-import { gemDB } from "Databases/GemDB";
+import { getCurrentStatGems, getCurrentMetaGems } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
 import { getFolioOptions, getFolioChoices, countFolioCombinations, FOLIO_SLOT_SETTINGS } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
-import { countGemLoadouts, countEnchantCombinations } from "./Engine/TopGearEngine";
+import { countGemLoadouts, countEnchantCombinations, getGemSearchSpace, getEnchantSearchSpace } from "./Engine/TopGearEngine";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*        Gem, enchant and Omnium Folio selection. Sits with item selection, not in settings.      */
@@ -39,16 +39,10 @@ const gemLabel = (gem: any) => {
   return `${gem.name}${stats ? " (" + stats + ")" : ""}`;
 };
 
-// Metas are listed separately since they aren't interchangeable with the stat gems. GemDB has a couple of
-// duplicated rows, so de-dupe before either list reaches a dropdown.
-const isMeta = (gem: any) => gem.element === "Meta" || gem.name.includes("Diamond");
-const uniqueById = (gems: any[]) => gems.filter((gem, i) => gems.findIndex((other) => other.id === gem.id) === i);
-const CURRENT_GEMS = uniqueById(gemDB.filter((gem) => gem.id >= 240000 && gem.id < 250000));
-
-const STAT_GEM_OPTIONS = CURRENT_GEMS.filter((gem) => !isMeta(gem))
+const STAT_GEM_OPTIONS = getCurrentStatGems()
   .map((gem) => ({ value: gem.id, label: gemLabel(gem), chip: gem.name.replace("Flawless ", "") }));
 const META_GEM_OPTIONS = [{ value: 0, label: "Automatic" }]
-  .concat(CURRENT_GEMS.filter(isMeta).map((gem) => ({ value: gem.id, label: gemLabel(gem) })));
+  .concat(getCurrentMetaGems().map((gem) => ({ value: gem.id, label: gemLabel(gem) })));
 
 /**
  * Upper bound on the sockets a built set can have, from the items the player has selected.
@@ -146,14 +140,29 @@ export default function GearOptionsSelector(props: any) {
     </Grid>
   );
 
-  if (!detailed) return <Grid container spacing={1} style={{ marginTop: 4 }}>{toggleBar}</Grid>;
+  // Optimize Everything lives in the settings panel and supersedes the pins below, so the section has to open for
+  // it too - otherwise the search depth it desperately needs would be unreachable.
+  const optimizeAll = settingValue("optimizeAllGearOptions", false) === true || settingValue("optimizeAllGearOptions", false) === "true";
+  if (!detailed && !optimizeAll) return <Grid container spacing={1} style={{ marginTop: 4 }}>{toggleBar}</Grid>;
+
+  const optimizeAllBanner = optimizeAll ? (
+    <Grid item xs={12}>
+      <Paper elevation={0} style={{ backgroundColor: "rgba(60,45,20,0.6)", padding: "6px 10px" }}>
+        <Typography variant="body2" style={{ color: "#f0c674" }}>
+          Optimize Everything is on, so Top Gear searches every gem, enchant and Folio rune itself. The picks below
+          are ignored while it's on - turn it off in Settings to go back to choosing them. Check the search depth.
+        </Typography>
+      </Paper>
+    </Grid>
+  ) : null;
 
   /* ------------------------------- Search depth and its projection ------------------------------ */
-  // The same arithmetic the engine does, so the number shown is the number that will actually run.
+  // Built from the same search spaces the engine uses, so the number shown is the number that will actually run.
   const variantLimit = Number(settingValue("gearVariantLimit", 24));
   const sockets = estimateSockets(selectedItems);
-  const gemLoadoutCount = pinnedGems.length > 1 ? countGemLoadouts(pinnedGems.length, sockets) : 1;
-  const enchantComboCount = Math.max(1, countEnchantCombinations(enchantChoices));
+  const searchedGems = getGemSearchSpace(playerSettings);
+  const gemLoadoutCount = searchedGems.length > 1 ? countGemLoadouts(searchedGems.length, sockets) : 1;
+  const enchantComboCount = Math.max(1, countEnchantCombinations(getEnchantSearchSpace(playerSettings, spec)));
   const folioComboCount = Math.max(1, countFolioCombinations(playerSettings));
   const projected = gemLoadoutCount * enchantComboCount * folioComboCount;
   const evaluated = variantLimit === 0 ? projected : Math.min(projected, variantLimit);
@@ -175,8 +184,8 @@ export default function GearOptionsSelector(props: any) {
           {select("Combinations evaluated", variantLimit, (v) => updateSetting("gearVariantLimit", Number(v)), VARIANT_LIMITS)}
           <Grid item xs={12} md={8}>
             <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)", display: "block" }}>
-              {pinnedGems.length > 1
-                ? `${pinnedGems.length} gems across ${sockets || "?"} sockets = ${plural(gemLoadoutCount, "loadout")}`
+              {searchedGems.length > 1
+                ? `${searchedGems.length} gems across ${sockets || "?"} sockets = ${plural(gemLoadoutCount, "loadout")}`
                 : "1 gem loadout"}
               {` x ${plural(enchantComboCount, "enchant combination")}`}
               {` x ${plural(folioComboCount, "Folio combination")} = `}
@@ -202,7 +211,9 @@ export default function GearOptionsSelector(props: any) {
   return (
     <Grid container spacing={1} style={{ marginTop: 4 }}>
       {toggleBar}
-      {section("Gems", "Pick the gems you want socketed. Select several and each combination is ranked as its own set. Automatic uses the default for your spec.", (
+      {optimizeAllBanner}
+      {searchDepth}
+      {!detailed ? null : section("Gems", "Pick the gems you want socketed. Select several and each combination is ranked as its own set. Automatic uses the default for your spec.", (
         <>
           {select("Meta Gem", settingValue("selectedMetaGem", 0), (v) => updateSetting("selectedMetaGem", Number(v)), META_GEM_OPTIONS)}
           {select("Gems", pinnedGems, (v) => updateSetting("selectedGems", v), STAT_GEM_OPTIONS,
@@ -225,7 +236,7 @@ export default function GearOptionsSelector(props: any) {
         </>
       ))}
 
-      {section("Enchants", "Pick one or more per slot. Selecting several ranks each combination as its own set.", (
+      {!detailed ? null : section("Enchants", "Pick one or more per slot. Selecting several ranks each combination as its own set.", (
         ENCHANTABLE_SLOTS.map((slot) => {
           const options = getEnchantsForSlot(slot, spec);
           if (options.length === 0) return null;
@@ -271,9 +282,7 @@ export default function GearOptionsSelector(props: any) {
         })
       ))}
 
-      {searchDepth}
-
-      {section("Omnium Folio", "Pick one or more runes per slot. Selecting several ranks each combination as its own set. Slots 2 and 3 have a single rune each, so only these are selectable.", (
+      {!detailed ? null : section("Omnium Folio", "Pick one or more runes per slot. Selecting several ranks each combination as its own set. Slots 2 and 3 have a single rune each, so only these are selectable.", (
         [1, 4, 5].map((slot) =>
           select(`Slot ${slot}`, getFolioChoices(playerSettings, slot), (v) => updateSetting(FOLIO_SLOT_SETTINGS[slot], v),
                  getFolioOptions(slot).map((rune) => ({ value: rune, label: rune })),

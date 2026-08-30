@@ -522,6 +522,10 @@
         "masteryEffectivenessEvoker": {
           "title": "Mastery Effectiveness %",
           "tooltip": "How effective your mastery is, as a percentage. Preservation mastery scales with how injured your targets are, so raise this for heavy raid damage and lower it for lighter healing."
+        },
+        "optimizeAllGearOptions": {
+          "title": "Optimize Everything",
+          "tooltip": "Search every gem, enchant and Omnium Folio rune instead of picking them yourself. Slow: the number of combinations multiplies, so set the search depth in the gear panel to match."
         }
       },
       "SettingsTitle": "Optional Settings"

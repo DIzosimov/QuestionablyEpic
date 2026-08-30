@@ -549,3 +549,84 @@ describe("Omnium Folio runes can be multi-selected", () => {
     expect(all % 4).toEqual(0);
   });
 });
+
+/*
+  Optimize Everything. A settings-panel switch that replaces pinning with a full search: the engine tries every
+  gem, enchant and Folio rune itself. It supersedes the pins rather than writing to them, so turning it off leaves
+  whatever the player had chosen exactly as they left it.
+*/
+const { getGemSearchSpace, getEnchantSearchSpace } = require("./TopGearEngine");
+const { getFolioSearchSpace, getFolioOptions } = require("Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData");
+const { getCurrentStatGems } = require("Databases/GemDB");
+const { ENCHANTABLE_SLOTS } = require("Databases/EnchantDB");
+
+describe("Optimize Everything searches the lot", () => {
+  const SPEC = "Preservation Evoker";
+  // It's a settings-panel switch, so it stands on its own rather than needing the gear panel's Detailed toggle.
+  const all = (overrides = {}) => cfg({ ...overrides, detailedGearOptions: false, optimizeAllGearOptions: true });
+
+  test("defaults to off", () => {
+    expect(base.optimizeAllGearOptions.value).toBe(false);
+    expect(getGemSearchSpace(cfg())).toEqual([]);
+  });
+
+  test("every current stat gem is searched, and no metas", () => {
+    const searched = getGemSearchSpace(all());
+    expect(searched).toEqual(getCurrentStatGems().map((gem) => gem.id));
+    expect(searched.length).toBeGreaterThan(1);
+    expect(searched).not.toContain(240983); // Indecipherable Eversong Diamond, a meta.
+  });
+
+  test("every enchant in every slot is searched", () => {
+    const searched = getEnchantSearchSpace(all(), SPEC);
+    const slotsWithOptions = ENCHANTABLE_SLOTS.filter((slot) => getEnchantsForSlot(slot, SPEC).length > 0);
+
+    expect(Object.keys(searched).sort()).toEqual(slotsWithOptions.sort());
+    slotsWithOptions.forEach((slot) => {
+      expect(searched[slot]).toEqual(getEnchantsForSlot(slot, SPEC).map((enchant) => enchant.id));
+    });
+  });
+
+  test("every Folio rune in every selectable slot is searched", () => {
+    [1, 4, 5].forEach((slot) => expect(getFolioSearchSpace(all(), slot)).toEqual(getFolioOptions(slot)));
+  });
+
+  test("it supersedes the player's pins without overwriting them", () => {
+    const pinned = { selectedGems: [240914], enchantChoices: { CombinedWeapon: ["Arcane Mastery"] }, folioSlot4: ["Crit"] };
+
+    // The search ignores the pins...
+    expect(getGemSearchSpace(all(pinned)).length).toBeGreaterThan(1);
+    expect(getEnchantSearchSpace(all(pinned), SPEC).CombinedWeapon.length).toBeGreaterThan(1);
+    expect(getFolioSearchSpace(all(pinned), 4).length).toBeGreaterThan(1);
+
+    // ...but the pins are still sitting there for when it's switched back off.
+    expect(getGemSearchSpace(cfg(pinned))).toEqual([240914]);
+    expect(getEnchantSearchSpace(cfg(pinned), SPEC)).toEqual({ CombinedWeapon: ["Arcane Mastery"] });
+    expect(getFolioSearchSpace(cfg(pinned), 4)).toEqual(["Crit"]);
+  });
+
+  test("a run evaluates far more sets than a plain one, up to the search depth", () => {
+    const plain = run(cfg()).itemsCompared;
+
+    expect(run(all()).itemsCompared).toEqual(plain * 24); // The default limit, saturated.
+    expect(run(all({ gearVariantLimit: 150 })).itemsCompared).toEqual(plain * 150);
+  });
+
+  test("the winner is a real set, wearing real gems and enchants", () => {
+    const best = run(all({ gearVariantLimit: 60 })).itemSet;
+
+    expect(best).toBeTruthy();
+    expect(best.setHPS).toBeGreaterThan(0);
+    best.enchantBreakdown["Gems"].slice(1).forEach((gem) => {
+      expect(getCurrentStatGems().map((g) => g.id)).toContain(gem);
+    });
+  });
+
+  test("it never returns a worse set than the plain run", () => {
+    // A capped search keeps the first N combinations, not the best N, so the engine's automatic pick is entered as
+    // a candidate too. Without that this genuinely loses to the plain run at some limits.
+    [24, 150, 0].forEach((gearVariantLimit) => {
+      expect(run(all({ gearVariantLimit })).itemSet.setHPS).toBeGreaterThanOrEqual(run(cfg()).itemSet.setHPS);
+    });
+  });
+});
