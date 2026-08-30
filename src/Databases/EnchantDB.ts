@@ -25,7 +25,8 @@ export const WEAPON_ENCHANT_DURATION = 15;
 
 export const enchantDB: EnchantEntry[] = [
   /* ------------------------------------------- Rings ------------------------------------------- */
-  // All ring enchants grant the same amount; the only difference is which stat.
+  // All ring enchants grant the same amount; the only difference is which stat. This is the value for ONE ring -
+  // a set wears two and each is applied separately, so a set running the same enchant on both gets twice this.
   { id: "Silvermoon's Alacrity", name: "Silvermoon's Alacrity", slots: ["Finger"], stats: { haste: 29 } },
   { id: "Nature's Fury", name: "Nature's Fury", slots: ["Finger"], stats: { crit: 29 } },
   { id: "Zul'jin's Mastery", name: "Zul'jin's Mastery", slots: ["Finger"], stats: { mastery: 29 } },
@@ -61,9 +62,20 @@ export const enchantDB: EnchantEntry[] = [
     procStats: { mastery: 124 }, isDefaultFor: ["Preservation Evoker"] },
 ];
 
+/**
+ * The two ring slots. A set wears two rings and each is enchanted on its own, so they're separate choices - but
+ * they draw from one list, since the game has no notion of a left-ring enchant.
+ */
+export const RING_SLOTS = ["Finger1", "Finger2"];
+
+/** The slot an enchant list is keyed under. Both ring slots share the Finger list. */
+export const enchantSlotSource = (slot: string): string => (RING_SLOTS.includes(slot) ? "Finger" : slot);
+
 /** Every enchant legal on a slot, filtered to the ones this spec can use. */
-export const getEnchantsForSlot = (slot: string, spec: string): EnchantEntry[] =>
-  enchantDB.filter((e) => e.slots.includes(slot) && (!e.specRestriction || e.specRestriction.includes(spec)));
+export const getEnchantsForSlot = (slot: string, spec: string): EnchantEntry[] => {
+  const source = enchantSlotSource(slot);
+  return enchantDB.filter((e) => e.slots.includes(source) && (!e.specRestriction || e.specRestriction.includes(spec)));
+};
 
 /** The enchant the engine picks automatically for a slot, or undefined when the choice is stat-driven. */
 export const getDefaultEnchant = (slot: string, spec: string): EnchantEntry | undefined => {
@@ -75,4 +87,4 @@ export const getDefaultEnchant = (slot: string, spec: string): EnchantEntry | un
 export const getEnchantById = (id: string): EnchantEntry | undefined => enchantDB.find((e) => e.id === id);
 
 /** Slots the player can choose an enchant for, in the order they're shown. */
-export const ENCHANTABLE_SLOTS = ["Head", "Shoulder", "Chest", "Legs", "Feet", "Finger", "CombinedWeapon"];
+export const ENCHANTABLE_SLOTS = ["Head", "Shoulder", "Chest", "Legs", "Feet", ...RING_SLOTS, "CombinedWeapon"];

@@ -171,16 +171,17 @@ export default function ItemCardReport(props) {
     </div>
   ) : null; */
 
+  // Rings share a slot name but are enchanted separately, so the report tells each card which entry is its own.
+  // Older reports were saved before the split and only have the shared Finger entry, hence the fallback.
   const enchantCheck = (item) => {
-    if (item.slot in enchants) {
-      let typo = (
-        <Typography variant="subtitle2" wrap="nowrap" display="block" align="left" style={{ fontSize: "12px", color: "#36ed21", paddingRight: 4 }}>
-          {enchants[item.slot]}
-        </Typography>
-      );
-      return typo;
-    }
-    return null;
+    const slot = (props.enchantSlot in enchants) ? props.enchantSlot : item.slot;
+    if (!(slot in enchants)) return null;
+
+    return (
+      <Typography variant="subtitle2" wrap="nowrap" display="block" align="left" style={{ fontSize: "12px", color: "#36ed21", paddingRight: 4 }}>
+        {enchants[slot]}
+      </Typography>
+    );
   };
 
   if (item.offhandID > 0) {

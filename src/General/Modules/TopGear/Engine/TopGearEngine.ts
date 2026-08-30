@@ -18,7 +18,8 @@ import { getCircletEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffe
 import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngineShared"
 import Item from "General/Items/Item";
 import { gemDB, getCurrentStatGems, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
-import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
+import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, RING_SLOTS, enchantSlotSource,
+         WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
 import { getFolioEffect, getFolioGems, buildFolioCombinations, getShortName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
@@ -299,9 +300,23 @@ export function getGemSearchSpace(userSettings: any): number[] {
   return Array.isArray(pinned) ? pinned.filter((gem: number) => gem > 0) : [];
 }
 
+/**
+ * The player's per-slot enchant choices, with the old single Finger key spread across both ring slots.
+ * Rings used to be one choice for the pair; profiles saved before the split still hold them that way.
+ */
+export function normaliseEnchantChoices(choices: any): any {
+  if (!choices || typeof choices !== "object") return {};
+  if (!choices.Finger) return choices;
+
+  const migrated = { ...choices };
+  RING_SLOTS.forEach((slot) => { if (!migrated[slot]) migrated[slot] = choices.Finger; });
+  delete migrated.Finger;
+  return migrated;
+}
+
 /** The enchants a run will try in each slot. */
 export function getEnchantSearchSpace(userSettings: any, spec: string): any {
-  if (!isOptimizeAllGear(userSettings)) return pinnedSlots(getGearOption(userSettings, "enchantChoices", {}));
+  if (!isOptimizeAllGear(userSettings)) return pinnedSlots(normaliseEnchantChoices(getGearOption(userSettings, "enchantChoices", {})));
 
   const everything: { [slot: string]: string[] } = {};
   ENCHANTABLE_SLOTS.forEach((slot) => { everything[slot] = getEnchantsForSlot(slot, spec).map((enchant) => enchant.id); });
@@ -834,8 +849,8 @@ function sumScore(obj: any) {
  * pinned several but the run isn't expanding variants.
  */
 function getPinnedEnchant(userSettings: any, slot: string, enchantOverride?: any) {
-  const choices = getGearOption(userSettings, "enchantChoices", null);
-  const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
+  const choices = normaliseEnchantChoices(getGearOption(userSettings, "enchantChoices", null));
+  const forSlot = choices[slot];
   const chosenId = (enchantOverride && enchantOverride[slot]) || (Array.isArray(forSlot) ? forSlot[0] : forSlot);
 
   return chosenId && chosenId !== "Automatic" ? getEnchantById(chosenId) : undefined;
@@ -847,7 +862,7 @@ function getSlotEnchant(userSettings: any, slot: string, spec: string, enchantOv
 
   // A pick that isn't legal on this slot (stale selection after a patch) is ignored rather than dropping the
   // enchant entirely, which would silently cost the player stats.
-  if (pinned && pinned.slots.includes(slot)) return pinned;
+  if (pinned && pinned.slots.includes(enchantSlotSource(slot))) return pinned;
   return getDefaultEnchant(slot, spec);
 }
 
@@ -884,17 +899,22 @@ function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, conte
   // isn't worth the extra churn in what the player is told to enchant.
   const highestWeight = getHighestWeight(castModel);
 
-  let ringEnchant = getPinnedEnchant(userSettings, "Finger", enchantOverride);
-  if (!ringEnchant || !ringEnchant.slots.includes("Finger")) {
-    // Automatic: Eyes of the Eagle where the spec uses it, otherwise the enchant matching their best stat.
-    ringEnchant = getDefaultEnchant("Finger", spec) ||
-      getEnchantsForSlot("Finger", spec).find((e) => e.stats && highestWeight in e.stats);
-    if (spec !== "Holy Priest" && spec !== "Restoration Shaman") {
-      ringEnchant = getEnchantsForSlot("Finger", spec).find((e) => e.stats && highestWeight in e.stats) || ringEnchant;
+  // A set wears two rings and each is enchanted on its own, so they're resolved and applied separately. Running
+  // the same enchant on both is just the case where the two happen to agree, and it lands twice as it should.
+  // Splitting them matters because secondaries diminish: 29 crit and 29 haste can beat 58 of either.
+  RING_SLOTS.forEach((slot) => {
+    let ringEnchant = getPinnedEnchant(userSettings, slot, enchantOverride);
+    if (!ringEnchant || !ringEnchant.slots.includes("Finger")) {
+      // Automatic: Eyes of the Eagle where the spec uses it, otherwise the enchant matching their best stat.
+      ringEnchant = getDefaultEnchant(slot, spec) ||
+        getEnchantsForSlot(slot, spec).find((e) => e.stats && highestWeight in e.stats);
+      if (spec !== "Holy Priest" && spec !== "Restoration Shaman") {
+        ringEnchant = getEnchantsForSlot(slot, spec).find((e) => e.stats && highestWeight in e.stats) || ringEnchant;
+      }
     }
-  }
-  applyEnchant(bonus_stats, ringEnchant, highestWeight);
-  enchants["Finger"] = ringEnchant ? ringEnchant.name : "";
+    applyEnchant(bonus_stats, ringEnchant, highestWeight);
+    enchants[slot] = ringEnchant ? ringEnchant.name : "";
+  });
 
   // Armour slots. One entry each today, but they read from the DB so adding options is a data change.
   ["Head", "Chest", "Shoulder", "Legs", "Feet"].forEach((slot) => {

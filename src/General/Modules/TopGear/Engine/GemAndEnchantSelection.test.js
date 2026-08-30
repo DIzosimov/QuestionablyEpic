@@ -64,8 +64,11 @@ describe("Enchants are selectable per slot", () => {
   });
 
   test("a chosen ring enchant overrides the best-stat pick", () => {
+    // Written before rings were split, so it also covers the migration: the old single Finger key has to reach
+    // both ring slots rather than being dropped.
     const r = run(cfg({ enchantChoices: { Finger: ["Silvermoon's Tenacity"] } }));
-    expect(r.itemSet.enchantBreakdown["Finger"]).toEqual("Silvermoon's Tenacity");
+    expect(r.itemSet.enchantBreakdown["Finger1"]).toEqual("Silvermoon's Tenacity");
+    expect(r.itemSet.enchantBreakdown["Finger2"]).toEqual("Silvermoon's Tenacity");
   });
 
   test("choosing a worse enchant measurably lowers throughput", () => {
@@ -782,5 +785,83 @@ describe("Every close alternative says what it swapped", () => {
 
   test("a plain run's alternatives still differ by items", () => {
     run(cfg()).differentials.forEach((d) => expect(swapCount(d)).toBeGreaterThan(0));
+  });
+});
+
+/*
+  Rings are enchanted one at a time. A set wears two and the game enchants each on its own, so they're two
+  independent choices rather than one applied to the pair. It matters beyond bookkeeping: secondaries diminish, so
+  29 crit and 29 haste can beat 58 of either.
+*/
+const { RING_SLOTS, enchantSlotSource, getEnchantsForSlot: enchantsForSlot } = require("Databases/EnchantDB");
+const { normaliseEnchantChoices } = require("./TopGearEngine");
+
+describe("Each ring is enchanted separately", () => {
+  test("both ring slots are selectable, and both draw from the Finger list", () => {
+    expect(RING_SLOTS).toEqual(["Finger1", "Finger2"]);
+    RING_SLOTS.forEach((slot) => {
+      expect(ENCHANTABLE_SLOTS).toContain(slot);
+      expect(enchantSlotSource(slot)).toEqual("Finger");
+      expect(enchantsForSlot(slot, "Preservation Evoker")).toEqual(enchantsForSlot("Finger", "Preservation Evoker"));
+    });
+    expect(ENCHANTABLE_SLOTS).not.toContain("Finger");
+  });
+
+  test("the two rings can carry different enchants", () => {
+    const r = run(cfg({ enchantChoices: { Finger1: ["Nature's Fury"], Finger2: ["Silvermoon's Alacrity"] } }));
+
+    expect(r.itemSet.enchantBreakdown["Finger1"]).toEqual("Nature's Fury");
+    expect(r.itemSet.enchantBreakdown["Finger2"]).toEqual("Silvermoon's Alacrity");
+  });
+
+  test("both rings' enchants land, rather than one for the pair", () => {
+    // Same enchant on both is worth twice one of them. Compared against a mismatched pair, which splits the
+    // budget across two stats, so the totals differ in shape rather than amount.
+    const both = run(cfg({ enchantChoices: { Finger1: ["Nature's Fury"], Finger2: ["Nature's Fury"] } }));
+    const split = run(cfg({ enchantChoices: { Finger1: ["Nature's Fury"], Finger2: ["Silvermoon's Alacrity"] } }));
+
+    expect(both.itemSet.setStats.crit - split.itemSet.setStats.crit).toBeGreaterThan(0);
+    expect(split.itemSet.setStats.haste - both.itemSet.setStats.haste).toBeGreaterThan(0);
+  });
+
+  test("the rings expand as two axes, not one", () => {
+    const pair = ["Nature's Fury", "Silvermoon's Alacrity"];
+    // Two choices on each of two rings is four combinations, where one shared choice would only be two.
+    expect(countEnchantCombinations(getEnchantSearchSpace(cfg({
+      enchantChoices: { Finger1: pair, Finger2: pair },
+    }), "Preservation Evoker"))).toEqual(4);
+  });
+
+  test("offering every ring enchant on both rings never loses to offering one", () => {
+    const options = enchantsForSlot("Finger", "Preservation Evoker").map((e) => e.id);
+    const names = enchantsForSlot("Finger", "Preservation Evoker").map((e) => e.name);
+
+    const single = run(cfg({ enchantChoices: { Finger1: [options[0]], Finger2: [options[0]] } }));
+    const searched = run(cfg({ enchantChoices: { Finger1: options, Finger2: options }, gearVariantLimit: 0 }));
+
+    expect(searched.itemSet.setHPS).toBeGreaterThanOrEqual(single.itemSet.setHPS);
+    // Whatever it settles on, both rings have to end up wearing something that was actually on offer.
+    RING_SLOTS.forEach((slot) => expect(names).toContain(searched.itemSet.enchantBreakdown[slot]));
+  });
+
+  test("profiles saved before the split still apply their pick to both rings", () => {
+    expect(normaliseEnchantChoices({ Finger: ["Nature's Fury"] }))
+      .toEqual({ Finger1: ["Nature's Fury"], Finger2: ["Nature's Fury"] });
+
+    // An explicit per-ring choice wins over the old shared one rather than being overwritten by it.
+    expect(normaliseEnchantChoices({ Finger: ["Nature's Fury"], Finger1: ["Zul'jin's Mastery"] }))
+      .toEqual({ Finger1: ["Zul'jin's Mastery"], Finger2: ["Nature's Fury"] });
+
+    expect(normaliseEnchantChoices({ Head: ["a"] })).toEqual({ Head: ["a"] });
+    expect(normaliseEnchantChoices(null)).toEqual({});
+  });
+
+  test("close alternatives name which ring changed", () => {
+    const options = enchantsForSlot("Finger", "Preservation Evoker").map((e) => e.id);
+    const differentials = run(cfg({ enchantChoices: { Finger1: options, Finger2: options }, gearVariantLimit: 0 })).differentials;
+    const ringSwaps = differentials.flatMap((d) => d.enchants).filter((e) => RING_SLOTS.includes(e.slot));
+
+    expect(ringSwaps.length).toBeGreaterThan(0);
+    ringSwaps.forEach((swap) => expect(["Finger1", "Finger2"]).toContain(swap.slot));
   });
 });

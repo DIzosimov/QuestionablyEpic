@@ -277,6 +277,15 @@ function displayReport(
   itemList = fullItemList.filter(item => item.isChosen);
   if (itemList.length === 0) itemList = fullItemList; // Fallback for older reports that don't have non-chosen items on them. Can be removed on a patch launch.
 
+  // Both rings are enchanted independently, so each ring card has to know which of the two it is - they share a
+  // slot name and would otherwise both look up the same entry, or none at all.
+  const enchantSlots = new Map();
+  let ringsSeen = 0;
+  itemList.forEach((item) => {
+    if (item.slot === "Finger") enchantSlots.set(item, "Finger" + ++ringsSeen);
+  });
+  const enchantSlotFor = (item) => enchantSlots.get(item) || item.slot;
+
   console.log(fullItemList);
   console.log(topSet);
 
@@ -507,6 +516,7 @@ function displayReport(
                                 item={item}
                                 activateItem={true}
                                 enchants={enchants}
+                                enchantSlot={enchantSlotFor(item)}
                                 gems={getGemIDs(item.slot)}
                                 firstSlot={topSet.firstSocket === item.slot}
                                 primGems={topSet.primGems || ""}
@@ -514,7 +524,7 @@ function displayReport(
                               />
                             ))}
                           {/*newWeaponCombos.map((item, index) => (
-                            <ItemCardReport key={index + "weapons"} item={item} activateItem={true} enchants={enchants} gems={getGemIDs(item.slot)} firstSlot={topSet.firstSocket === item.slot}  />
+                            <ItemCardReport key={index + "weapons"} item={item} activateItem={true} enchants={enchants} enchantSlot={enchantSlotFor(item)} gems={getGemIDs(item.slot)} firstSlot={topSet.firstSocket === item.slot}  />
                           ))*/}
                         </Grid>
                       </Grid>
@@ -561,6 +571,7 @@ function displayReport(
                                 item={item}
                                 activateItem={true}
                                 enchants={enchants}
+                                enchantSlot={enchantSlotFor(item)}
                                 gems={getGemIDs(item.slot)}
                                 firstSlot={topSet.firstSocket === item.slot}
                                 primGems={topSet.primGems || ""}

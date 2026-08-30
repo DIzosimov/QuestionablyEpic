@@ -3,7 +3,7 @@ import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel
 import { getCurrentStatGems, getCurrentMetaGems } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
 import { getFolioOptions, getFolioChoices, countFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
-import { countGemLoadouts, countEnchantCombinations, getGemSearchSpace, getEnchantSearchSpace } from "./Engine/TopGearEngine";
+import { countGemLoadouts, countEnchantCombinations, getGemSearchSpace, getEnchantSearchSpace, normaliseEnchantChoices } from "./Engine/TopGearEngine";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*        Gem, enchant and Omnium Folio selection. Sits with item selection, not in settings.      */
@@ -18,9 +18,10 @@ import { countGemLoadouts, countEnchantCombinations, getGemSearchSpace, getEncha
 // it's capped, and the cap is a setting: "No limit" is the full combinatorics you want when hunting the genuinely
 // optimal setup. That's easy to make unrunnable by accident, hence the projection in the Search depth section.
 
+// Rings are two independent choices, so they're labelled as two.
 const SLOT_LABELS: { [key: string]: string } = {
   Head: "Head", Shoulder: "Shoulder", Chest: "Chest", Legs: "Legs",
-  Feet: "Feet", Finger: "Rings", CombinedWeapon: "Weapon",
+  Feet: "Feet", Finger1: "Ring 1", Finger2: "Ring 2", CombinedWeapon: "Weapon",
 };
 
 // Slots that appear twice in a set, so both of their sockets count toward the total.
@@ -70,7 +71,7 @@ export default function GearOptionsSelector(props: any) {
   const settingValue = (key: string, fallback: any) =>
     playerSettings && playerSettings[key] !== undefined ? playerSettings[key].value : fallback;
 
-  const enchantChoices = settingValue("enchantChoices", {}) || {};
+  const enchantChoices = normaliseEnchantChoices(settingValue("enchantChoices", {}));
   const pinnedGems: number[] = settingValue("selectedGems", []) || [];
   const setEnchant = (slot: string, ids: string[]) =>
     updateSetting("enchantChoices", { ...enchantChoices, [slot]: ids });

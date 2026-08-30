@@ -13,7 +13,7 @@ const swapChipStyle = {
   display: "flex", flexDirection: "column", justifyContent: "center",
 };
 
-const SWAP_SLOT_LABELS = { CombinedWeapon: "Weapon", Finger: "Rings" };
+const SWAP_SLOT_LABELS = { CombinedWeapon: "Weapon", Finger1: "Ring 1", Finger2: "Ring 2" };
 
 function CompetitiveAlternatives(props) {
   const { t, i18n } = useTranslation();
