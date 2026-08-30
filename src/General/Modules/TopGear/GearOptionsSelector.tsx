@@ -150,7 +150,7 @@ export default function GearOptionsSelector(props: any) {
       <Paper elevation={0} style={{ backgroundColor: "rgba(60,45,20,0.6)", padding: "6px 10px" }}>
         <Typography variant="body2" style={{ color: "#f0c674" }}>
           Optimize Everything is on, so Top Gear searches every gem, enchant and Folio rune itself. The picks below
-          are ignored while it's on - turn it off in Settings to go back to choosing them. Check the search depth.
+          are ignored while it's on - switch it off above to go back to choosing them. Check the search depth.
         </Typography>
       </Paper>
     </Grid>

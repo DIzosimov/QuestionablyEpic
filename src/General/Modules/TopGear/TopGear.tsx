@@ -851,6 +851,7 @@ export default function TopGear(props: any) {
             allChars={props.allChars}
             contentType={contentType}
             singleUpdate={props.singleUpdate}
+            optimizeToggle={true}
           />
         </Grid>
 

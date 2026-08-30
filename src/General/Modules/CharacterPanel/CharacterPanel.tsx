@@ -533,7 +533,7 @@ export default function CharacterPanel(props: Props) {
                   )}
                 </Grid>
             <Divider />
-            <Settings player={props.player} contentType={props.contentType} singleUpdate={props.singleUpdate} hymnalShow={true} groupBuffShow={true} autoSocket={true} />
+            <Settings player={props.player} contentType={props.contentType} singleUpdate={props.singleUpdate} hymnalShow={true} groupBuffShow={true} autoSocket={true} optimizeToggle={props.optimizeToggle} />
           </Grid>
         </Grid>
       </div>
