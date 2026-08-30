@@ -6,7 +6,7 @@ import "./../QuickCompare/QuickCompare.css";
 import { useTranslation } from "react-i18next";
 // import { testTrinkets } from "../Engine/EffectFormulas/Generic/TrinketEffectFormulas";
 import { apiSendTopGearSet } from "../SetupAndMenus/ConnectionUtilities";
-import { Button, Grid, Typography, Divider, Snackbar, SnackbarCloseReason } from "@mui/material";
+import { Button, Grid, Typography, Divider, Snackbar, SnackbarCloseReason, LinearProgress } from "@mui/material";
 import MuiAlert from "@mui/material/Alert";
 import { buildNewWepCombos, getForcedEmbellishmentCount, MAX_EMBELLISHMENTS } from "../../Engine/ItemUtilities";
 import MiniItemCard from "./MiniItemCard";
@@ -25,6 +25,7 @@ import { RootState } from "Redux/Reducers/RootReducer";
 import { Item } from "General/Items/Item";
 import {Player } from "General/Modules/Player/Player";
 import { TopGearResult } from "General/Modules/TopGear/Engine/TopGearResult";
+import { TopGearProgress } from "./Engine/TopGearEngine";
 import TopGearReforgePanel from "./TopGearReforgePanel";
 import { getSetting } from "Retail/Engine/EffectFormulas/EffectUtilities";
 import { prepareTopGear } from "./Engine/TopGearEngineClassic";
@@ -183,6 +184,9 @@ export default function TopGear(props: any) {
   /* ------------ itemList isn't used for anything here other than to trigger rerenders ----------- */
   const [itemList, setItemList] = useState(props.player.getActiveItems(activeSlot));
   const [btnActive, setBtnActive] = useState<boolean>(true);
+  // Where the running engine has got to. Null whenever a run isn't in flight, which is what hides the bar.
+  const [progress, setProgress] = useState<TopGearProgress | null>(null);
+  const runStartedAt = React.useRef(0);
   
   const [errorMessage, setErrorMessage] = useState("");
   const patronStatus: string = props.patronStatus;
@@ -552,7 +556,7 @@ export default function TopGear(props: any) {
         baseHPS,
         playerSettings,
         strippedCastModel,
-      })
+      }, setProgress)
         .then((result: TopGearResult | null) => { // 
           if (result) {
             // If top gear completes successfully, log a successful run, terminate the worker and then press on to the Report.
@@ -567,6 +571,7 @@ export default function TopGear(props: any) {
           else { // A valid set was not returned.
             setErrorMessage("Top Gear has crashed. So sorry! It's been automatically reported.");
             console.log("Null Set Returned");
+            setProgress(null);
             setBtnActive(true);
           }
         })
@@ -575,6 +580,7 @@ export default function TopGear(props: any) {
           reportError("", "Top Gear Crash", err, strippedPlayer.spec);
           setErrorMessage("Top Gear has crashed. So sorry! It's been automatically reported.");
           console.log(err);
+          setProgress(null);
           setBtnActive(true);
         });
     } else if (gameType === "Classic") {
@@ -679,11 +685,17 @@ export default function TopGear(props: any) {
   };
 
   // We'll run our Engine in a separate thread to avoid blocking the UI.
-  const runWorker = (gameType: gameTypes, args: any) => {
+  const runWorker = (gameType: gameTypes, args: any, onProgress?: (p: any) => void) => {
     return new Promise((resolve, reject) => {
       const worker = createTopGearWorker();
   
       worker.onmessage = (event) => {
+        // Progress messages arrive throughout the run; only the final one carries a result.
+        if (event.data.progress) {
+          if (onProgress) onProgress(event.data.progress);
+          return;
+        }
+
         const { success, result, error } = event.data;
         worker.terminate();
         if (success) resolve(result);
@@ -703,6 +715,8 @@ export default function TopGear(props: any) {
     /* ----------------------- Call to the Top Gear Engine. Lock the app down. ---------------------- */
     if (checkTopGearValid()) {
       setBtnActive(false);
+      setProgress(null);
+      runStartedAt.current = performance.now();
       // Special Error Code
       try {
         unleashWorker();
@@ -710,9 +724,46 @@ export default function TopGear(props: any) {
         setErrorMessage("Top Gear has crashed. Sorry! It's been automatically reported.");
         reportError("", "Top Gear Full Crash", err, JSON.stringify(props.player) || "");
         console.log(err);
+        setProgress(null);
         setBtnActive(true);
       }
     }
+  };
+
+  /* ---------------------------------------------------------------------------------------------- */
+  /*                                        Run progress bar                                        */
+  /* ---------------------------------------------------------------------------------------------- */
+  // A run can take anywhere from a second to several minutes depending on how many items are selected and how
+  // wide the gem / enchant / rune search is, and until now the button just went grey. The engine reports its
+  // progress about a hundred times over a run, which is enough to both fill a bar and estimate what's left.
+
+  const formatRemaining = (ms: number) => {
+    const seconds = Math.ceil(ms / 1000);
+    if (seconds < 60) return `~${seconds}s left`;
+    return `~${Math.floor(seconds / 60)}m ${seconds % 60}s left`;
+  };
+
+  const renderProgress = () => {
+    if (!progress) return null;
+    const { stage, done, total } = progress;
+    // Set building reports no total, so the bar runs indeterminate until evaluations start.
+    const measured = total > 0;
+    const percent = measured ? Math.min(100, (done / total) * 100) : 0;
+
+    const elapsed = performance.now() - runStartedAt.current;
+    // Wait for a second of real work before estimating - before that the rate is mostly startup noise.
+    const remaining = measured && done > 0 && elapsed > 1000 ? (elapsed / done) * (total - done) : 0;
+
+    return (
+      <div style={{ width: 300 }}>
+        <Typography variant="caption" style={{ color: "rgba(255,255,255,0.8)", display: "block" }}>
+          {stage}
+          {measured ? ` — ${done.toLocaleString()} / ${total.toLocaleString()} (${Math.round(percent)}%)` : ""}
+          {remaining > 0 ? ` · ${formatRemaining(remaining)}` : ""}
+        </Typography>
+        <LinearProgress variant={measured ? "determinate" : "indeterminate"} value={percent} style={{ height: 6, borderRadius: 3 }} />
+      </div>
+    );
   };
 
   const changeReforgeFrom = (buttonClicked: "string") => {
@@ -874,6 +925,7 @@ export default function TopGear(props: any) {
           <Typography variant="subtitle1" align="center" style={{ padding: "2px 2px 2px 2px", marginRight: "5px" }} color="primary">
               {getErrorMessage()}
             </Typography>
+          {renderProgress()}
           <div>
             <Button 
               variant="contained" 

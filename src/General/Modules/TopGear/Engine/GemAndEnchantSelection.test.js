@@ -630,3 +630,62 @@ describe("Optimize Everything searches the lot", () => {
     });
   });
 });
+
+/*
+  Run progress. The engine reports where it is so the page can show a bar and an estimate. It's optional - every
+  other test in this file calls runTopGear without it - so the contract worth pinning is that the numbers add up.
+*/
+describe("A run reports its progress", () => {
+  const runWithProgress = (settings) => {
+    const updates = [];
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    GEAR.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      player.addActiveItem(item);
+    });
+    const result = runTopGear(player.getSelectedItems(), buildNewWepCombos(player, player.getSelectedItems()), player,
+                              "Raid", 1000, settings, player.getActiveModel("Raid"), false, (p) => updates.push(p));
+    return { result, updates };
+  };
+
+  test("it reports set building first, then evaluation, then ranking", () => {
+    const { updates } = runWithProgress(cfg());
+    const stages = [...new Set(updates.map((u) => u.stage))];
+
+    expect(stages[0]).toEqual("Building gear sets");
+    expect(stages[stages.length - 1]).toEqual("Ranking results");
+    expect(updates[0].total).toEqual(0); // No total until the sets exist to count.
+  });
+
+  test("done climbs to exactly the total, and never past it", () => {
+    const { updates } = runWithProgress(cfg({ selectedGems: [240898, 240890, 240914] }));
+    const measured = updates.filter((u) => u.total > 0);
+
+    expect(measured.length).toBeGreaterThan(1);
+    measured.forEach((u) => expect(u.done).toBeLessThanOrEqual(u.total));
+    measured.reduce((previous, u) => {
+      expect(u.done).toBeGreaterThanOrEqual(previous);
+      return u.done;
+    }, 0);
+
+    const last = measured[measured.length - 1];
+    expect(last.done).toEqual(last.total);
+  });
+
+  test("the total counts evaluations, so a wider search reports a bigger one", () => {
+    const totalFor = (settings) => {
+      const measured = runWithProgress(settings).updates.filter((u) => u.total > 0);
+      return measured[measured.length - 1].total;
+    };
+    const wide = { selectedGems: [240898, 240890, 240914], gearVariantLimit: 0 };
+
+    expect(totalFor(cfg(wide))).toBeGreaterThan(totalFor(cfg()));
+  });
+
+  test("a run without a callback behaves identically", () => {
+    const settings = cfg({ selectedGems: [240898, 240890] });
+    expect(runWithProgress(settings).result.itemSet.setHPS).toEqual(run(settings).itemSet.setHPS);
+  });
+});

@@ -373,6 +373,13 @@ function getGemOptions(spec: string, contentType: contentTypes) {
 }
 
 /**
+ * Where a run has got to. `total` is the number of set evaluations the run will do - sets times variants - which
+ * is only known once the sets are built, so it's 0 during the first stage.
+ */
+export type TopGearProgress = { stage: string; done: number; total: number };
+export type TopGearProgressCallback = (progress: TopGearProgress) => void;
+
+/**
  * This is our core Top Gear function. It puts together valid sets, then calls for them to be scored.
  *
  * @param {*} rawItemList A raw list of items. This is usually all of the items a player has selected.
@@ -382,10 +389,15 @@ function getGemOptions(spec: string, contentType: contentTypes) {
  * @param {*} baseHPS The models expected HPS. This is also stored in the CastModel but it's included separately for a faster reference. Could probably be rewritten out in future.
  * @param {*} userSettings The players settings. This represents the small settings panel near the top of Top Gear / Upgrade Finder.
  * @param {*} castModel
+ * @param onProgress Called as the run advances so the UI can show where it is. Optional - tests and the Upgrade
+ *                   Finder don't pass one, and the run behaves identically without it.
  * @returns A Top Gear result which includes the best set, and how close various alternatives are.
  */
 export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Player, contentType: contentTypes, 
-                            baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true) {
+                            baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true,
+                            onProgress?: TopGearProgressCallback) {
+  const report = onProgress || (() => {});
+  report({ stage: "Building gear sets", done: 0, total: 0 });
   //console.log("Running Top Gear")
   // == Setup Player & Cast Model ==
   // Create player / cast model objects in this thread based on data from the player character & player model.
@@ -465,21 +477,22 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
     variants.unshift({ gemLoadout: null, enchantOverride: null, folioOverride: null });
   }
 
+  // Evaluations, not sets: with variants a single set is scored once per configuration, and that multiplier is
+  // exactly what makes a run long enough to need a progress bar in the first place.
+  const totalEvaluations = itemSets.length * variants.length;
+  // Report ~100 times over the run, so the bar moves smoothly without the postMessage traffic becoming the cost.
+  const reportEvery = Math.max(1, Math.floor(totalEvaluations / 100));
+  let evaluated = 0;
+
   for (var i = 0; i < itemSets.length; i++) {
-    if (variants.length > 1) {
-      variants.forEach((variant) => {
-        resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
-                                variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined));
-      });
-    }
-    else {
-      const only = variants[0];
+    variants.forEach((variant) => {
       resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
-                              only && only.gemLoadout ? only.gemLoadout : undefined,
-                              only && only.enchantOverride ? only.enchantOverride : undefined,
-                              only && only.folioOverride ? only.folioOverride : undefined));
-    }
+                              variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined));
+      if (++evaluated % reportEvery === 0) report({ stage: "Evaluating sets", done: evaluated, total: totalEvaluations });
+    });
   }
+
+  report({ stage: "Ranking results", done: totalEvaluations, total: totalEvaluations });
 
 
   // == Sort and Prune sets ==

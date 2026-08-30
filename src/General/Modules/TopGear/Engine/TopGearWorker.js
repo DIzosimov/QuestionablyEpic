@@ -18,6 +18,8 @@ self.onmessage = async function (e) {
       if (gameType === "Retail") {
         const { runTopGear } = await import("./TopGearEngine.ts");
 
+        // Progress messages are posted as the run advances. The worker thread is busy the whole time, but posting
+        // doesn't need it to yield - the main thread picks them up on its own event loop.
         const result = await runTopGear(
           itemList,
           wepCombos,
@@ -25,7 +27,9 @@ self.onmessage = async function (e) {
           contentType,
           baseHPS,
           playerSettings,
-          strippedCastModel
+          strippedCastModel,
+          true,
+          (progress) => self.postMessage({ progress })
         );
   
         self.postMessage({ success: true, result });
