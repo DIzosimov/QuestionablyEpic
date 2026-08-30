@@ -41,10 +41,12 @@ export const getFolioIcon = (id: number) => {
   else console.error("Gem Icon not found");
 }
 
-// The Folio has five rune slots. Slots 2 and 3 currently have a single option each, so only 1, 4 and 5 are
-// configurable. Each setting accepts "Automatic" (keep the engine's own pick), a rune's shortName, or a list of
-// shortNames - selecting several expands the run into one variant per combination, the same as gems and enchants.
-export const FOLIO_SLOT_SETTINGS: { [slot: number]: string } = { 1: "folioSlot1", 4: "folioSlot4", 5: "folioSlot5" };
+// The Folio has five rune slots, but only slot 4 - the pure secondary stat slot - is worth choosing between.
+// Slots 2 and 3 have a single rune each, and the slot 1 and 5 runes are procs the engine already picks well, so
+// offering them just multiplied the search for nothing. The setting accepts a rune's shortName or a list of them -
+// selecting several expands the run into one variant per combination, the same as gems and enchants.
+export const FOLIO_STAT_SLOT = 4;
+export const FOLIO_SLOT_SETTINGS: { [slot: number]: string } = { [FOLIO_STAT_SLOT]: "folioSlot4" };
 
 // The rune the engine falls back to when a slot is left on Automatic and there is no stat-weight rule for it.
 const FOLIO_AUTO_DEFAULTS: { [slot: number]: number } = { 1: 1279599, 2: 1279603, 3: 1287555, 5: 1279614 };

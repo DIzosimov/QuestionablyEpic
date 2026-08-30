@@ -3,7 +3,7 @@ import Item from "General/Items/Item";
 import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
 import { runTopGear } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
-import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import rootReducer from "Redux/Reducers/RootReducer";
 
 /*
@@ -139,7 +139,7 @@ describe("Folio runes are selectable", () => {
   });
 
   test("a stale rune name falls back to Automatic instead of losing the slot", () => {
-    const stale = cfg({ folioSlot1: "No Such Rune" });
+    const stale = cfg({ folioSlot4: "No Such Rune" });
     expect(getFolioGems(stale, "haste").length).toEqual(5);
     expect(getFolioGems(stale, "haste")[0]).toEqual(1279599);
   });
@@ -459,7 +459,7 @@ describe("Search depth is configurable", () => {
 */
 describe("Omnium Folio runes can be multi-selected", () => {
   const CRIT = 1279609, HASTE = 1287774, VERS = 1279613;
-  const VOID_TOUCHED = 1279596, UNLEASHED_FIRE = 1279599;
+  const UNLEASHED_FIRE = 1279599; // Slot 1's automatic pick, which nothing selectable can change any more.
 
   test("an untouched profile is Automatic and expands into nothing", () => {
     expect(getFolioChoices(cfg(), 4)).toEqual([]);
@@ -485,18 +485,26 @@ describe("Omnium Folio runes can be multi-selected", () => {
     expect(combos.map((c) => c[4]).sort()).toEqual(["Crit", "Haste", "Vers"]);
   });
 
-  test("slots multiply together, and the count agrees with the build", () => {
-    const settings = cfg({ folioSlot1: ["Unleashed Fire", "Void-Touched"], folioSlot4: ["Crit", "Haste", "Vers"] });
-    expect(countFolioCombinations(settings)).toEqual(6);
-    expect(buildFolioCombinations(settings).length).toEqual(6);
-    expect(buildFolioCombinations(settings, 4).length).toEqual(4);
+  test("the count agrees with the build, and the cap applies", () => {
+    const settings = cfg({ folioSlot4: ["Crit", "Haste", "Vers"] });
+    expect(countFolioCombinations(settings)).toEqual(3);
+    expect(buildFolioCombinations(settings).length).toEqual(3);
+    expect(buildFolioCombinations(settings, 2).length).toEqual(2);
   });
 
-  test("a variant picks the rune for its slot, the rest stay Automatic", () => {
-    const settings = cfg({ folioSlot1: ["Unleashed Fire", "Void-Touched"], folioSlot4: ["Crit", "Vers"] });
+  test("a variant picks the stat rune, and every other slot stays Automatic", () => {
+    const settings = cfg({ folioSlot4: ["Crit", "Vers"] });
 
-    expect(getFolioGems(settings, "haste", { 1: "Void-Touched", 4: "Vers" })).toEqual([VOID_TOUCHED, 1279603, 1287555, VERS, 1279614]);
-    expect(getFolioGems(settings, "haste", { 1: "Unleashed Fire", 4: "Crit" })).toEqual([UNLEASHED_FIRE, 1279603, 1287555, CRIT, 1279614]);
+    expect(getFolioGems(settings, "haste", { 4: "Vers" })).toEqual([UNLEASHED_FIRE, 1279603, 1287555, VERS, 1279614]);
+    expect(getFolioGems(settings, "haste", { 4: "Crit" })).toEqual([UNLEASHED_FIRE, 1279603, 1287555, CRIT, 1279614]);
+  });
+
+  test("only the stat slot is selectable at all", () => {
+    // Slots 1 and 5 are deliberately not offered - their runes are procs the engine already picks well, and
+    // searching them multiplied every run for nothing.
+    expect(Object.keys(FOLIO_SLOT_SETTINGS)).toEqual([String(FOLIO_STAT_SLOT)]);
+    expect(getFolioChoices(cfg({ folioSlot1: ["Void-Touched"] }), 1)).toEqual([]);
+    expect(getFolioGems(cfg({ folioSlot1: ["Void-Touched"] }), "haste")[0]).toEqual(UNLEASHED_FIRE);
   });
 
   test("several pinned but no variant falls back to Automatic rather than guessing one", () => {
@@ -507,7 +515,7 @@ describe("Omnium Folio runes can be multi-selected", () => {
 
   test("a stale rune name in a list falls through to Automatic", () => {
     expect(getFolioGems(cfg({ folioSlot4: ["No Such Rune"] }), "haste")[3]).toEqual(HASTE);
-    expect(getFolioGems(cfg({ folioSlot1: ["No Such Rune"] }), "haste").length).toEqual(5);
+    expect(getFolioGems(cfg({ folioSlot4: ["No Such Rune"] }), "haste").length).toEqual(5);
   });
 
   test("the detailed toggle still gates them", () => {
@@ -587,8 +595,8 @@ describe("Optimize Everything searches the lot", () => {
     });
   });
 
-  test("every Folio rune in every selectable slot is searched", () => {
-    [1, 4, 5].forEach((slot) => expect(getFolioSearchSpace(all(), slot)).toEqual(getFolioOptions(slot)));
+  test("every Folio stat rune is searched", () => {
+    expect(getFolioSearchSpace(all(), FOLIO_STAT_SLOT)).toEqual(getFolioOptions(FOLIO_STAT_SLOT));
   });
 
   test("it supersedes the player's pins without overwriting them", () => {

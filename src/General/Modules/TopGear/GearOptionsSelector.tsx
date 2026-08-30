@@ -2,7 +2,7 @@ import React from "react";
 import { Grid, Paper, Typography, Divider, MenuItem, TextField, FormControlLabel, Checkbox, Tooltip, Chip, Switch } from "@mui/material";
 import { getCurrentStatGems, getCurrentMetaGems } from "Databases/GemDB";
 import { getEnchantsForSlot, ENCHANTABLE_SLOTS } from "Databases/EnchantDB";
-import { getFolioOptions, getFolioChoices, countFolioCombinations, FOLIO_SLOT_SETTINGS } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getFolioOptions, getFolioChoices, countFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import { countGemLoadouts, countEnchantCombinations, getGemSearchSpace, getEnchantSearchSpace } from "./Engine/TopGearEngine";
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -282,11 +282,11 @@ export default function GearOptionsSelector(props: any) {
         })
       ))}
 
-      {!detailed ? null : section("Omnium Folio", "Pick one or more runes per slot. Selecting several ranks each combination as its own set. Slots 2 and 3 have a single rune each, so only these are selectable.", (
-        [1, 4, 5].map((slot) =>
-          select(`Slot ${slot}`, getFolioChoices(playerSettings, slot), (v) => updateSetting(FOLIO_SLOT_SETTINGS[slot], v),
-                 getFolioOptions(slot).map((rune) => ({ value: rune, label: rune })),
-                 { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Leave empty for Automatic." }))
+      {!detailed ? null : section("Omnium Folio", "The secondary stat rune is the only one worth choosing - the rest are picked for you. Select several and each is ranked as its own set.", (
+        select("Secondary Stat Rune", getFolioChoices(playerSettings, FOLIO_STAT_SLOT),
+               (v) => updateSetting(FOLIO_SLOT_SETTINGS[FOLIO_STAT_SLOT], v),
+               getFolioOptions(FOLIO_STAT_SLOT).map((rune) => ({ value: rune, label: rune })),
+               { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Leave empty for Automatic." })
       ))}
     </Grid>
   );

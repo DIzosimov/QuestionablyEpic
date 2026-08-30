@@ -69,11 +69,10 @@ const initialState : RootState = {
     // How far the gem x enchant expansion is allowed to run. 0 means no limit - every combination is evaluated,
     // which is exhaustive but grows fast, so the panel shows the projected count before a run.
     gearVariantLimit: {value: 24, options: [24, 60, 150, 500, 2000, 0], category: "gems", type: "hidden", gameType: "Retail"},
-    // Folio slots hold a list of pinned runes; empty is Automatic. The bare string these used to hold is still
-    // accepted, since it's what already-saved profiles have (see getFolioChoices).
-    folioSlot1: {value: [], options: ["Unleashed Fire", "Void-Touched"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
+    // Slot 4 is the Folio's secondary stat slot and the only one worth choosing between - see FOLIO_SLOT_SETTINGS.
+    // It holds a list of pinned runes; empty is Automatic. The bare string it used to hold is still accepted,
+    // since that's what already-saved profiles have (see getFolioChoices).
     folioSlot4: {value: [], options: ["Haste", "Crit", "Mastery", "Vers"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
-    folioSlot5: {value: [], options: ["Overload", "Residual Energy", "Echoes"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
 
     // Consumables. Only options with real modelled values are offered - see the consumables block in TopGearEngine.
     foodBuff: {value: "Intellect Food", options: ["Intellect Food", "None"], category: "consumables", type: "selector", gameType: "Retail"},
