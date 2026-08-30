@@ -1387,30 +1387,63 @@ function sumObjectsByKey<T extends Record<string | number, number>>(objs: T[]): 
 } */
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                                  Detailed gear options toggle                                   */
+/*                              Detailed gear options: gems, enchants, runes                       */
 /* ---------------------------------------------------------------------------------------------- */
-// Gem, enchant and Folio selection is opt-in. With the toggle off Top Gear behaves exactly as it did before any
-// of it existed: every one of these settings reads as its "Automatic" default, so a profile that was configured
-// once and then switched back to the simple view can't quietly keep steering the run.
-
-export const DETAILED_GEAR_OPTIONS = "detailedGearOptions";
+// Pinning gems, enchants and Folio runes is opt-in. With the toggle off every one of those settings reads as its
+// Automatic default, so a profile configured once and then switched back to the simple view can't keep steering
+// later runs from a panel the player has collapsed.
 
 export function isDetailedGearOptions(userSettings: any): boolean {
-  if (!userSettings || typeof userSettings !== "object") return false;
-  const setting = userSettings[DETAILED_GEAR_OPTIONS];
-  if (!setting) return false;
+  const toggle = userSettings && typeof userSettings === "object" ? userSettings.detailedGearOptions : null;
   // The settings panel writes checkbox values straight through, so tolerate the string form.
-  return setting.value === true || setting.value === "true";
+  return !!toggle && (toggle.value === true || toggle.value === "true");
+}
+
+/** Reads one of the detailed gear options, or its Automatic fallback while the toggle is off. */
+export function getGearOption(userSettings: any, key: string, fallback: any): any {
+  if (!isDetailedGearOptions(userSettings)) return fallback;
+  const setting = userSettings[key];
+  return setting && setting.value !== undefined ? setting.value : fallback;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                     Multi-select expansion                                      */
+/* ---------------------------------------------------------------------------------------------- */
+// Gems, enchants and Folio runes all let the player pin several options per slot, and all three expand a run into
+// one variant per combination. That expansion is the same cartesian product every time, so it lives here rather
+// than being written out once per feature.
+
+export type SlotChoices = { [slot: string]: any[] };
+
+/** Drops slots with nothing pinned, since they contribute no combinations. */
+export function pinnedSlots(choices: SlotChoices): SlotChoices {
+  const pinned: SlotChoices = {};
+  Object.keys(choices || {}).forEach((slot) => {
+    if (Array.isArray(choices[slot]) && choices[slot].length > 0) pinned[slot] = choices[slot];
+  });
+  return pinned;
 }
 
 /**
- * Reads one of the detailed gear options, falling back to its Automatic default while the toggle is off.
- * @param userSettings The raw player settings object.
- * @param key The setting name.
- * @param fallback The value that reproduces the pre-toggle behaviour.
+ * Every combination of one pinned choice per slot, as complete { slot: choice } overrides.
+ * Nothing pinned yields no combinations at all, which callers read as "leave it to the engine".
  */
-export function getGearOption(userSettings: any, key: string, fallback: any): any {
-  if (!isDetailedGearOptions(userSettings)) return fallback;
-  const setting = userSettings && typeof userSettings === "object" ? userSettings[key] : null;
-  return setting && setting.value !== undefined ? setting.value : fallback;
+export function buildChoiceCombinations(choices: SlotChoices, cap: number = Infinity): any[] {
+  const slots = Object.keys(pinnedSlots(choices));
+  if (slots.length === 0) return [];
+
+  return slots.reduce((combinations: any[], slot) => {
+    const next: any[] = [];
+    combinations.forEach((combo) =>
+      choices[slot].forEach((choice) => {
+        if (next.length < cap) next.push({ ...combo, [slot]: choice });
+      }));
+    return next;
+  }, [{}]);
+}
+
+/** How many combinations buildChoiceCombinations would produce, without paying to build them. */
+export function countChoiceCombinations(choices: SlotChoices): number {
+  const counts = Object.values(pinnedSlots(choices)).map((list) => list.length);
+  return counts.length === 0 ? 0 : counts.reduce((total, n) => total * n, 1);
 }

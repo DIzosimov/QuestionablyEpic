@@ -1,7 +1,7 @@
 import { convertPPMToUptime, processedValue, runGenericPPMTrinket, 
     getHighestStat, getLowestStat, runGenericOnUseTrinket, getDiminishedValue, runDiscOnUseTrinket, runGenericFlatProc } from "Retail/Engine/EffectFormulas/EffectUtilities";
     
-import { compileStats, getEstimatedHPS, getGearOption } from "General/Engine/ItemUtilities"
+import { compileStats, getEstimatedHPS, getGearOption, buildChoiceCombinations, countChoiceCombinations } from "General/Engine/ItemUtilities"
 
 import Player from "General/Modules/Player/Player";
 
@@ -64,47 +64,30 @@ export const getFolioOptions = (slot: number): string[] => {
 /**
  * The runes the player has pinned for one slot. An empty list means Automatic.
  *
- * Tolerates the bare string the setting held before multi-select, which is still what older profiles have sitting
- * in local storage, so upgrading doesn't silently drop someone's existing pick.
+ * Accepts the bare shortName the setting held before multi-select as well as a list, since that is still what
+ * already-saved profiles hold and upgrading must not silently drop someone's pick.
  */
 export const getFolioChoices = (settings: any, slot: number): string[] => {
   const settingKey = FOLIO_SLOT_SETTINGS[slot];
   if (!settingKey) return [];
   // Reads as Automatic while the detailed gear options toggle is off, so the runes are the engine's own pick.
   const raw = getGearOption(settings, settingKey, "Automatic");
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list.filter((choice: any) => typeof choice === "string" && choice !== "" && choice !== "Automatic");
+  const pinned = Array.isArray(raw) ? raw : [raw];
+  return pinned.filter((rune: any) => typeof rune === "string" && rune !== "" && rune !== "Automatic");
 };
 
-/** How many Folio combinations a selection produces. 0 means nothing is pinned and there is nothing to expand. */
-export const countFolioCombinations = (settings: any): number => {
-  const counts = Object.keys(FOLIO_SLOT_SETTINGS)
-    .map((slot) => getFolioChoices(settings, Number(slot)).length)
-    .filter((n) => n > 0);
-  return counts.length === 0 ? 0 : counts.reduce((total, n) => total * n, 1);
+/** The pinned runes keyed by slot, which is the shape the shared combination helpers expect. */
+const pinnedRunes = (settings: any) => {
+  const bySlot: { [slot: string]: string[] } = {};
+  Object.keys(FOLIO_SLOT_SETTINGS).forEach((slot) => { bySlot[slot] = getFolioChoices(settings, Number(slot)); });
+  return bySlot;
 };
 
-/**
- * Expands the pinned runes into every combination, each one a complete { slot: shortName } override.
- * A slot left on Automatic contributes nothing and keeps the engine's own pick for that slot.
- */
-export const buildFolioCombinations = (settings: any, cap: number = Infinity): any[] => {
-  const slots = Object.keys(FOLIO_SLOT_SETTINGS).map(Number).filter((slot) => getFolioChoices(settings, slot).length > 0);
-  if (slots.length === 0) return [];
+export const countFolioCombinations = (settings: any): number => countChoiceCombinations(pinnedRunes(settings));
 
-  let combinations: any[] = [{}];
-  slots.forEach((slot) => {
-    const next: any[] = [];
-    combinations.forEach((combo) => {
-      getFolioChoices(settings, slot).forEach((name) => {
-        if (next.length < cap) next.push({ ...combo, [slot]: name });
-      });
-    });
-    combinations = next;
-  });
-
-  return combinations;
-};
+/** Expands the pinned runes into every combination, each a complete { slot: shortName } override. */
+export const buildFolioCombinations = (settings: any, cap: number = Infinity): any[] =>
+  buildChoiceCombinations(pinnedRunes(settings), cap);
 
 /**
  * Resolves the player's Folio settings into the five rune IDs to equip.

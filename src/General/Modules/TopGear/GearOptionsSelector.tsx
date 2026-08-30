@@ -9,80 +9,77 @@ import { countGemLoadouts, countEnchantCombinations } from "./Engine/TopGearEngi
 /*        Gem, enchant and Omnium Folio selection. Sits with item selection, not in settings.      */
 /* ---------------------------------------------------------------------------------------------- */
 // These are choices about the set being built, the same as picking which items to include, so they belong next to
-// item selection rather than in the global settings panel. Each Top Gear run uses exactly one configuration.
+// item selection rather than in the global settings panel.
 //
-// The whole section is behind a Detailed toggle. Off - which is the default - Top Gear looks and behaves exactly
-// as it did before any of this existed, and the engine ignores these settings entirely (see getGearOption), so a
-// profile that was configured once can't keep steering later runs from a panel the player has collapsed.
+// Everything here is behind a Detailed toggle, off by default, and the engine ignores these settings while it's
+// off (see getGearOption) - a profile configured once can't keep steering runs from a panel that's collapsed.
 //
-// Multi-selecting gems and enchants expands a run into one variant per combination, and the total is multiplicative,
-// so it's capped. The cap is a setting rather than a constant: "No limit" runs the full combinatorics, which is what
-// you want when hunting the genuinely optimal setup and can't accept a truncated search. Because that's easy to make
-// unrunnable by accident, the panel projects the real count from the current selection before the run happens.
+// Pinning several options per slot expands a run into one variant per combination. The total is multiplicative, so
+// it's capped, and the cap is a setting: "No limit" is the full combinatorics you want when hunting the genuinely
+// optimal setup. That's easy to make unrunnable by accident, hence the projection in the Search depth section.
 
 const SLOT_LABELS: { [key: string]: string } = {
   Head: "Head", Shoulder: "Shoulder", Chest: "Chest", Legs: "Legs",
   Feet: "Feet", Finger: "Rings", CombinedWeapon: "Weapon",
 };
 
-// Current-expansion gems. Metas are chosen separately since they aren't interchangeable with the stat gems.
-const isMeta = (gem: any) => (gem.element === "Meta") || gem.name.includes("Diamond");
-const currentGems = () => gemDB.filter((g) => g.id >= 240000 && g.id < 250000);
+// Slots that appear twice in a set, so both of their sockets count toward the total.
+const DOUBLE_SLOTS = ["Finger", "Trinket"];
+
+const VARIANT_LIMITS = [24, 60, 150, 500, 2000, 0].map((limit) => ({
+  value: limit,
+  label: limit === 0 ? "No limit - every combination" : `${limit}${limit === 24 ? " (default)" : ""}`,
+}));
 
 const gemLabel = (gem: any) => {
   const stats = Object.entries(gem.stats || {})
-    .filter(([k]) => k !== "manaPerc")
-    .map(([k, v]) => `${v} ${k}`)
+    .filter(([stat]) => stat !== "manaPerc")
+    .map(([stat, amount]) => `${amount} ${stat}`)
     .join(" / ");
   return `${gem.name}${stats ? " (" + stats + ")" : ""}`;
 };
 
-// Slots that appear twice in a set, so both of their sockets count toward the total.
-const DOUBLE_SLOTS = ["Finger", "Trinket"];
+// Metas are listed separately since they aren't interchangeable with the stat gems. GemDB has a couple of
+// duplicated rows, so de-dupe before either list reaches a dropdown.
+const isMeta = (gem: any) => gem.element === "Meta" || gem.name.includes("Diamond");
+const uniqueById = (gems: any[]) => gems.filter((gem, i) => gems.findIndex((other) => other.id === gem.id) === i);
+const CURRENT_GEMS = uniqueById(gemDB.filter((gem) => gem.id >= 240000 && gem.id < 250000));
+
+const STAT_GEM_OPTIONS = CURRENT_GEMS.filter((gem) => !isMeta(gem))
+  .map((gem) => ({ value: gem.id, label: gemLabel(gem), chip: gem.name.replace("Flawless ", "") }));
+const META_GEM_OPTIONS = [{ value: 0, label: "Automatic" }]
+  .concat(CURRENT_GEMS.filter(isMeta).map((gem) => ({ value: gem.id, label: gemLabel(gem) })));
 
 /**
  * Upper bound on the sockets a built set can have, from the items the player has selected.
  *
- * The engine works this out per set; here we can only take the best-socketed item in each slot, which is the same
- * number the engine's own maxSockets lands on. It's an estimate purely so the projection below is honest about
- * scale - the run itself never uses it.
+ * The engine works this out per set; here we can only take the best-socketed item in each slot. It feeds the
+ * projection below and nothing else - the run itself never uses it.
  */
 const estimateSockets = (selectedItems: any[]) => {
-  const bySlot: { [slot: string]: number[] } = {};
+  const socketsBySlot: { [slot: string]: number[] } = {};
   (selectedItems || []).forEach((item: any) => {
-    if (!item || !item.socket) return;
-    (bySlot[item.slot] = bySlot[item.slot] || []).push(item.socket);
+    if (item && item.socket) (socketsBySlot[item.slot] = socketsBySlot[item.slot] || []).push(item.socket);
   });
-  return Object.keys(bySlot).reduce((total, slot) => {
-    const sorted = bySlot[slot].sort((a, b) => b - a);
-    return total + sorted.slice(0, DOUBLE_SLOTS.indexOf(slot) > -1 ? 2 : 1).reduce((n, s) => n + s, 0);
+
+  return Object.entries(socketsBySlot).reduce((total, [slot, sockets]) => {
+    const best = sockets.sort((a, b) => b - a).slice(0, DOUBLE_SLOTS.includes(slot) ? 2 : 1);
+    return total + best.reduce((sum, n) => sum + n, 0);
   }, 0);
 };
 
-const VARIANT_LIMITS = [
-  { value: 24, label: "Balanced - 24 (default)" },
-  { value: 60, label: "Wider - 60" },
-  { value: 150, label: "Deep - 150" },
-  { value: 500, label: "Very deep - 500" },
-  { value: 2000, label: "Exhaustive - 2000" },
-  { value: 0, label: "No limit - every combination" },
-];
+type SelectOption = { value: any; label: string; chip?: string };
 
 export default function GearOptionsSelector(props: any) {
   const { playerSettings, updateSetting, spec, selectedItems } = props;
 
-  const value = (key: string, fallback: any) =>
+  const settingValue = (key: string, fallback: any) =>
     playerSettings && playerSettings[key] !== undefined ? playerSettings[key].value : fallback;
 
-  const enchantChoices = value("enchantChoices", {}) || {};
-  const selectedGems: number[] = value("selectedGems", []) || [];
-  const setEnchant = (slot: string, id: string) =>
-    updateSetting("enchantChoices", { ...enchantChoices, [slot]: id });
-
-  const stat = currentGems().filter((g) => !isMeta(g));
-  const metas = currentGems().filter(isMeta);
-  // GemDB has a couple of duplicated rows; de-dupe so the dropdown doesn't show the same gem twice.
-  const dedupe = (list: any[]) => list.filter((g, i) => list.findIndex((o) => o.id === g.id) === i);
+  const enchantChoices = settingValue("enchantChoices", {}) || {};
+  const pinnedGems: number[] = settingValue("selectedGems", []) || [];
+  const setEnchant = (slot: string, ids: string[]) =>
+    updateSetting("enchantChoices", { ...enchantChoices, [slot]: ids });
 
   const section = (title: string, hint: string, children: any) => (
     <Grid item xs={12}>
@@ -95,41 +92,40 @@ export default function GearOptionsSelector(props: any) {
     </Grid>
   );
 
-  /** Multi-select with an Automatic empty state, used by the Folio slots. Picking several expands the run. */
-  const multiDropdown = (label: string, chosen: string[], onChange: (v: string[]) => void, options: string[], helper: string) => (
-    <Grid item xs={12} sm={6} md={4} key={label}>
-      <TextField
-        select fullWidth size="small" variant="outlined" label={label}
-        SelectProps={{
-          multiple: true,
-          renderValue: (selected: any) => ((selected as string[]).length === 0 ? "Automatic" : (selected as string[]).join(", ")),
-        }}
-        value={chosen}
-        onChange={(e) => onChange((e.target.value as unknown as string[]).filter((v) => v))}
-        helperText={helper}
-      >
-        {options.map((o) => (
-          <MenuItem key={o} value={o}>
-            <Checkbox size="small" checked={chosen.indexOf(o) > -1} />
-            {o}
-          </MenuItem>
-        ))}
-      </TextField>
-    </Grid>
-  );
+  /**
+   * One dropdown. `multiple` makes it a checkbox multi-select reading "Automatic" when empty, which is how gems
+   * and Folio runes are pinned; picking several there expands the run into one variant per combination.
+   */
+  const select = (label: string, chosen: any, onChange: (v: any) => void, options: SelectOption[],
+                  opts: { multiple?: boolean; helper?: string; grid?: any } = {}) => {
+    const chipFor = (value: any) => {
+      const option = options.find((o) => o.value === value);
+      return option ? (option.chip || option.label) : value;
+    };
 
-  const dropdown = (label: string, val: any, onChange: (v: any) => void, options: { value: any; label: string }[]) => (
-    <Grid item xs={12} sm={6} md={4} lg={3} key={label}>
-      <TextField select fullWidth size="small" variant="outlined" label={label} value={val}
-                 onChange={(e) => onChange(e.target.value)} style={{ minWidth: 150 }}>
-        {options.map((o) => (
-          <MenuItem key={String(o.value)} value={o.value}>{o.label}</MenuItem>
-        ))}
-      </TextField>
-    </Grid>
-  );
+    return (
+      <Grid item {...(opts.grid || { xs: 12, sm: 6, md: 4, lg: 3 })} key={label}>
+        <TextField
+          select fullWidth size="small" variant="outlined" label={label} value={chosen} helperText={opts.helper}
+          style={{ minWidth: 150 }}
+          SelectProps={opts.multiple ? {
+            multiple: true,
+            renderValue: (selected: any) => (selected.length === 0 ? "Automatic" : selected.map(chipFor).join(", ")),
+          } : undefined}
+          onChange={(e) => onChange(opts.multiple ? (e.target.value as unknown as any[]).filter((v) => v) : e.target.value)}
+        >
+          {options.map((option) => (
+            <MenuItem key={String(option.value)} value={option.value}>
+              {opts.multiple ? <Checkbox size="small" checked={chosen.indexOf(option.value) > -1} /> : null}
+              {option.label}
+            </MenuItem>
+          ))}
+        </TextField>
+      </Grid>
+    );
+  };
 
-  const detailed = value("detailedGearOptions", false) === true;
+  const detailed = settingValue("detailedGearOptions", false) === true;
 
   const toggleBar = (
     <Grid item xs={12}>
@@ -150,44 +146,44 @@ export default function GearOptionsSelector(props: any) {
     </Grid>
   );
 
+  if (!detailed) return <Grid container spacing={1} style={{ marginTop: 4 }}>{toggleBar}</Grid>;
+
   /* ------------------------------- Search depth and its projection ------------------------------ */
-  // Every number here is the same arithmetic the engine does, so what's shown is what will actually run.
-  const limit = Number(value("gearVariantLimit", 24));
+  // The same arithmetic the engine does, so the number shown is the number that will actually run.
+  const variantLimit = Number(settingValue("gearVariantLimit", 24));
   const sockets = estimateSockets(selectedItems);
-  const gemLoadouts = selectedGems.length > 1 ? countGemLoadouts(selectedGems.length, sockets) : 1;
-  const enchantCombos = Math.max(1, countEnchantCombinations(enchantChoices));
-  const folioCombos = Math.max(1, countFolioCombinations(playerSettings));
-  const projected = gemLoadouts * enchantCombos * folioCombos;
-  const evaluated = limit === 0 ? projected : Math.min(projected, limit);
-  const truncated = projected > evaluated;
-  // Past a few thousand variants every gear set is re-evaluated that many times over, which is where runs stop
-  // being slow and start being unusable. Worth saying out loud before the player presses the button.
+  const gemLoadoutCount = pinnedGems.length > 1 ? countGemLoadouts(pinnedGems.length, sockets) : 1;
+  const enchantComboCount = Math.max(1, countEnchantCombinations(enchantChoices));
+  const folioComboCount = Math.max(1, countFolioCombinations(playerSettings));
+  const projected = gemLoadoutCount * enchantComboCount * folioComboCount;
+  const evaluated = variantLimit === 0 ? projected : Math.min(projected, variantLimit);
+  // Past a few thousand every gear set is re-evaluated that many times over, which is where runs stop being slow
+  // and start being unusable. Worth saying out loud before the player presses the button.
   const heavy = evaluated > 2000;
+
+  const plural = (count: number, noun: string) => `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
 
   const searchDepth = (
     <Grid item xs={12}>
       <Paper elevation={0} style={{ backgroundColor: "rgba(28,28,28,0.5)", padding: 10 }}>
         <Typography variant="subtitle1" color="primary">Search depth</Typography>
         <Typography variant="caption" style={{ color: "rgba(255,255,255,0.55)", display: "block", marginBottom: 6 }}>
-          How many gem and enchant combinations a run is allowed to evaluate. No limit is a full, exhaustive search.
+          How many combinations a run is allowed to evaluate. No limit is a full, exhaustive search.
         </Typography>
         <Divider style={{ borderColor: "rgba(255,255,255,0.12)", marginBottom: 10 }} />
         <Grid container spacing={1} alignItems="center">
-          {dropdown("Combinations evaluated", limit, (v) => updateSetting("gearVariantLimit", Number(v)), VARIANT_LIMITS)}
-          <Grid item xs={12} sm={12} md={8}>
+          {select("Combinations evaluated", variantLimit, (v) => updateSetting("gearVariantLimit", Number(v)), VARIANT_LIMITS)}
+          <Grid item xs={12} md={8}>
             <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)", display: "block" }}>
-              {selectedGems.length > 1
-                ? `${selectedGems.length} gems across ${sockets || "?"} sockets = ${gemLoadouts.toLocaleString()} loadouts`
-                : "Gems: 1 loadout"}
-              {" x "}
-              {enchantCombos.toLocaleString()} enchant {enchantCombos === 1 ? "combination" : "combinations"}
-              {" x "}
-              {folioCombos.toLocaleString()} Folio {folioCombos === 1 ? "combination" : "combinations"}
-              {" = "}
+              {pinnedGems.length > 1
+                ? `${pinnedGems.length} gems across ${sockets || "?"} sockets = ${plural(gemLoadoutCount, "loadout")}`
+                : "1 gem loadout"}
+              {` x ${plural(enchantComboCount, "enchant combination")}`}
+              {` x ${plural(folioComboCount, "Folio combination")} = `}
               <strong>{projected.toLocaleString()}</strong> variants, each evaluated against every gear set.
             </Typography>
-            <Typography variant="caption" style={{ color: truncated ? "#f0c674" : "#8fbf6f", display: "block" }}>
-              {truncated
+            <Typography variant="caption" style={{ color: projected > evaluated ? "#f0c674" : "#8fbf6f", display: "block" }}>
+              {projected > evaluated
                 ? `Only ${evaluated.toLocaleString()} of them will run - raise the limit to search all ${projected.toLocaleString()}.`
                 : `All ${projected.toLocaleString()} will run.`}
             </Typography>
@@ -203,40 +199,15 @@ export default function GearOptionsSelector(props: any) {
     </Grid>
   );
 
-  if (!detailed) return <Grid container spacing={1} style={{ marginTop: 4 }}>{toggleBar}</Grid>;
-
   return (
     <Grid container spacing={1} style={{ marginTop: 4 }}>
       {toggleBar}
       {section("Gems", "Pick the gems you want socketed. Select several and each combination is ranked as its own set. Automatic uses the default for your spec.", (
         <>
-          {dropdown("Meta Gem", value("selectedMetaGem", 0), (v) => updateSetting("selectedMetaGem", Number(v)),
-            [{ value: 0, label: "Automatic" }].concat(dedupe(metas).map((g) => ({ value: g.id, label: gemLabel(g) }))))}
-          <Grid item xs={12} sm={8} md={6}>
-            <TextField
-              select fullWidth size="small" variant="outlined" label="Gems"
-              SelectProps={{
-                multiple: true,
-                renderValue: (selected: any) =>
-                  (selected as number[]).length === 0
-                    ? "Automatic"
-                    : (selected as number[]).map((id) => {
-                        const g = gemDB.find((x) => x.id === id);
-                        return g ? g.name.replace("Flawless ", "") : id;
-                      }).join(", "),
-              }}
-              value={selectedGems}
-              onChange={(e) => updateSetting("selectedGems", (e.target.value as unknown as number[]).filter((v) => v))}
-              helperText="Pick more than one and Top Gear ranks each combination as its own set."
-            >
-              {dedupe(stat).map((g) => (
-                <MenuItem key={g.id} value={g.id}>
-                  <Checkbox size="small" checked={selectedGems.indexOf(g.id) > -1} />
-                  {gemLabel(g)}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
+          {select("Meta Gem", settingValue("selectedMetaGem", 0), (v) => updateSetting("selectedMetaGem", Number(v)), META_GEM_OPTIONS)}
+          {select("Gems", pinnedGems, (v) => updateSetting("selectedGems", v), STAT_GEM_OPTIONS,
+                  { multiple: true, grid: { xs: 12, sm: 8, md: 6 },
+                    helper: "Pick more than one and Top Gear ranks each combination as its own set." })}
           <Grid item xs={12}>
             <Tooltip placement="right" title={
               <Typography variant="caption">
@@ -245,7 +216,7 @@ export default function GearOptionsSelector(props: any) {
               </Typography>
             }>
               <FormControlLabel
-                control={<Checkbox size="small" checked={value("replaceExistingGems", true) !== false}
+                control={<Checkbox size="small" checked={settingValue("replaceExistingGems", true) !== false}
                                    onChange={(e) => updateSetting("replaceExistingGems", e.target.checked)} />}
                 label={<Typography variant="body2">Replace gems I already have socketed</Typography>}
               />
@@ -279,18 +250,21 @@ export default function GearOptionsSelector(props: any) {
                   {chosen.length === 0 ? "Automatic" : chosen.length + " selected"}
                 </Typography>
                 <Divider style={{ borderColor: "rgba(255,255,255,0.1)", marginBottom: 4 }} />
-                {options.map((e) => (
-                  <div key={e.id} onClick={() => toggle(e.id)}
-                       style={{
-                         display: "flex", alignItems: "center", cursor: "pointer", padding: "1px 2px", borderRadius: 3,
-                         border: chosen.indexOf(e.id) > -1 ? "1px solid rgba(255,200,80,0.55)" : "1px solid transparent",
-                       }}>
-                    <Checkbox size="small" checked={chosen.indexOf(e.id) > -1} style={{ padding: 3 }} />
-                    <Typography variant="caption" style={{ color: chosen.indexOf(e.id) > -1 ? "goldenrod" : "rgba(255,255,255,0.8)" }}>
-                      {e.name}
-                    </Typography>
-                  </div>
-                ))}
+                {options.map((enchant) => {
+                  const picked = chosen.indexOf(enchant.id) > -1;
+                  return (
+                    <div key={enchant.id} onClick={() => toggle(enchant.id)}
+                         style={{
+                           display: "flex", alignItems: "center", cursor: "pointer", padding: "1px 2px", borderRadius: 3,
+                           border: picked ? "1px solid rgba(255,200,80,0.55)" : "1px solid transparent",
+                         }}>
+                      <Checkbox size="small" checked={picked} style={{ padding: 3 }} />
+                      <Typography variant="caption" style={{ color: picked ? "goldenrod" : "rgba(255,255,255,0.8)" }}>
+                        {enchant.name}
+                      </Typography>
+                    </div>
+                  );
+                })}
               </Paper>
             </Grid>
           );
@@ -300,12 +274,10 @@ export default function GearOptionsSelector(props: any) {
       {searchDepth}
 
       {section("Omnium Folio", "Pick one or more runes per slot. Selecting several ranks each combination as its own set. Slots 2 and 3 have a single rune each, so only these are selectable.", (
-        <>
-          {[1, 4, 5].map((slot) =>
-            multiDropdown(`Slot ${slot}`, getFolioChoices(playerSettings, slot),
-                          (v) => updateSetting(FOLIO_SLOT_SETTINGS[slot], v), getFolioOptions(slot),
-                          "Leave empty for Automatic."))}
-        </>
+        [1, 4, 5].map((slot) =>
+          select(`Slot ${slot}`, getFolioChoices(playerSettings, slot), (v) => updateSetting(FOLIO_SLOT_SETTINGS[slot], v),
+                 getFolioOptions(slot).map((rune) => ({ value: rune, label: rune })),
+                 { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Leave empty for Automatic." }))
       ))}
     </Grid>
   );

@@ -6,7 +6,8 @@ import { convertPPMToUptime, getSetting, getDiminishedValue } from "../../../../
 import Player from "../../Player/Player";
 import CastModel from "../../Player/CastModel";
 import { getEffectValue } from "../../../../Retail/Engine/EffectFormulas/EffectEngine";
-import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished, getGearOption } from "General/Engine/ItemUtilities";
+import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished, getGearOption,
+         buildChoiceCombinations, countChoiceCombinations, pinnedSlots } from "General/Engine/ItemUtilities";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTrinketValue } from "Retail/Engine/EffectFormulas/Generic/Trinkets/TrinketEffectFormulas";
 import { allRamps, allRampsHealing, getDefaultDiscTalents } from "General/Modules/Player/ClassDefaults/DisciplinePriest/DiscRampUtilities";
@@ -165,40 +166,36 @@ function getMidnightGemOptions(spec: string, contentType: contentTypes, settings
  *
  * Top Gear has always ignored the player's socketed gems and assigned its own to every socket, which quietly
  * assumes they'll re-gem the whole set. `replaceExistingGems` makes that explicit:
- *   - true  : every socket gets the chosen (or automatic) gem, as before.
+ *   - true  : every socket gets the pinned (or automatic) gem, as before.
  *   - false : sockets that already hold a gem keep it, and only empty ones are filled.
- *
- * Equipped gems come from the SimC import, which stores them on the item as a colon separated gemString.
  */
 function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes, userSettings: any, gemLoadout?: number[]): number[] {
   const sockets = Math.max(0, builtSet.setSockets);
   if (sockets === 0) return [];
 
-  // When several gems are selected the caller hands us one specific loadout to evaluate; otherwise fall back to
-  // the single selected gem, and failing that the engine's automatic choice.
-  const selected = getGearOption(userSettings, "selectedGems", []);
-  const singleSelection = Array.isArray(selected) && selected.length === 1 && selected[0] > 0 ? selected[0] : null;
   const automatic = getMidnightGemOptions(player.spec, contentType, userSettings);
-  const filler = singleSelection;
 
-  // Meta is socket 0 and is chosen separately, since it is not interchangeable with the stat gems.
-  const chosenMeta = getGearOption(userSettings, "selectedMetaGem", 0);
-  const metaId = typeof chosenMeta === "number" && chosenMeta > 0 ? chosenMeta : automatic[0];
+  // Stat sockets take, in order of preference: the loadout this variant is evaluating, the player's single pinned
+  // gem, or the engine's own pick. Meta is socket 0 and is chosen separately, being interchangeable with nothing.
+  const loadout = gemLoadout && gemLoadout.length > 0 ? gemLoadout : null;
+  const pinnedGems = getGearOption(userSettings, "selectedGems", []);
+  const pinnedFiller = Array.isArray(pinnedGems) && pinnedGems.length === 1 && pinnedGems[0] > 0 ? pinnedGems[0] : null;
+  const pinnedMeta = getGearOption(userSettings, "selectedMetaGem", 0);
 
   const buildAutomatic = () => {
     const gems = automatic.slice(0, sockets);
-    if (gems.length > 0) gems[0] = metaId;
+    if (gems.length > 0) gems[0] = typeof pinnedMeta === "number" && pinnedMeta > 0 ? pinnedMeta : automatic[0];
     for (let i = 1; i < gems.length; i++) {
-      // A loadout takes precedence, then a single selected gem, then whatever the engine picked.
-      if (gemLoadout && gemLoadout.length > 0) gems[i] = gemLoadout[(i - 1) % gemLoadout.length];
-      else if (filler) gems[i] = filler;
+      if (loadout) gems[i] = loadout[(i - 1) % loadout.length];
+      else if (pinnedFiller) gems[i] = pinnedFiller;
     }
     return gems;
   };
 
   if (getGearOption(userSettings, "replaceExistingGems", true) !== false) return buildAutomatic();
 
-  // Fill-empty mode: keep what's already socketed, top up the rest.
+  // Fill-empty mode: keep what's already socketed, top up the rest. Equipped gems come from the SimC import,
+  // which stores them on the item as a colon separated gemString.
   const equipped: number[] = [];
   (builtSet.itemList || []).forEach((item: any) => {
     if (!item.socket) return;
@@ -206,8 +203,7 @@ function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes
     for (let i = 0; i < item.socket; i++) equipped.push(onItem[i] && gemDB.some((g) => g.id === onItem[i]) ? onItem[i] : 0);
   });
 
-  const fallback = buildAutomatic();
-  return fallback.map((auto: number, i: number) => (equipped[i] ? equipped[i] : auto));
+  return buildAutomatic().map((auto: number, i: number) => equipped[i] || auto);
 }
 
 function getGemStats(gemArray: number[]) {
@@ -230,49 +226,45 @@ function getGemStats(gemArray: number[]) {
   return gem_stats;
 }
 
-// The most gem loadouts we'll expand a run into. Every loadout multiplies the number of sets Top Gear evaluates,
-// and the whole gem spread is worth a fraction of a percent, so this is deliberately modest.
+// Gems get their own, tighter default cap: the whole gem spread is worth a fraction of a percent, so it isn't
+// worth spending the run's entire variant budget on.
 const MAX_GEM_LOADOUTS = 12;
 
 /**
- * Turns the player's selected gems into the distinct ways they can fill a set's sockets.
+ * The distinct ways the player's pinned gems can fill a set's sockets.
  *
  * Sockets are interchangeable for stat purposes, so only the multiset matters - two of gem A and one of gem B is
- * the same set of stats regardless of which socket holds which. That keeps the expansion to combinations rather
- * than permutations. One selected gem yields one loadout, which is the same as the old single-gem behaviour.
+ * the same stats whichever socket holds which - which keeps this to combinations rather than permutations.
  */
-export function buildGemLoadouts(selectedGems: number[], sockets: number, cap: number = MAX_GEM_LOADOUTS): number[][] {
-  const gems = (selectedGems || []).filter((g) => g > 0);
+export function buildGemLoadouts(pinnedGems: number[], sockets: number, cap: number = MAX_GEM_LOADOUTS): number[][] {
+  const gems = (pinnedGems || []).filter((g) => g > 0);
   if (gems.length === 0 || sockets <= 0) return [];
   if (gems.length === 1) return [new Array(sockets).fill(gems[0])];
 
   const loadouts: number[][] = [];
-  // Walk combinations with repetition, keeping gem order so each multiset is produced exactly once.
-  const walk = (startIndex: number, current: number[]) => {
+  // Combinations with repetition: never step back past the gem we're on, so each multiset is produced once.
+  const fillFrom = (firstGem: number, loadout: number[]) => {
     if (loadouts.length >= cap) return;
-    if (current.length === sockets) { loadouts.push(current.slice()); return; }
-    for (let g = startIndex; g < gems.length; g++) {
-      current.push(gems[g]);
-      walk(g, current);
-      current.pop();
-      if (loadouts.length >= cap) return;
+    if (loadout.length === sockets) { loadouts.push(loadout.slice()); return; }
+    for (let g = firstGem; g < gems.length && loadouts.length < cap; g++) {
+      loadout.push(gems[g]);
+      fillFrom(g, loadout);
+      loadout.pop();
     }
   };
-  walk(0, []);
+  fillFrom(0, []);
   return loadouts;
 }
 
-// Default number of gem x enchant variants a single run expands into. Every variant re-evaluates every gear set,
-// so the default is deliberately modest - but it's only a default. gearVariantLimit raises it, and a limit of 0
-// removes it entirely for an exhaustive search (see resolveVariantLimit).
+// Default number of variants a single run expands into. Every variant re-evaluates every gear set, so the default
+// is deliberately modest - but it is only a default; gearVariantLimit raises it, and 0 removes it entirely.
 const MAX_SET_VARIANTS = 24;
 
 /**
- * The number of variants this run is allowed to expand into.
+ * How many variants this run may expand into, with 0 meaning no limit at all.
  *
- * A limit of 0 means "no limit" and returns Infinity, which switches the builders below from a truncated search to
- * full combinatorics. That is genuinely exhaustive and genuinely slow: the count is multiplicative, and every
- * variant re-evaluates every gear set, so the panel projects the total before the player commits to a run.
+ * Infinity switches the builders below from a truncated search to full combinatorics: exhaustive, and slow in
+ * proportion, since the count is multiplicative and every variant re-evaluates every gear set.
  */
 export function resolveVariantLimit(userSettings: any): number {
   const raw = getGearOption(userSettings, "gearVariantLimit", MAX_SET_VARIANTS);
@@ -284,51 +276,20 @@ export function resolveVariantLimit(userSettings: any): number {
 
 /**
  * How many distinct gem loadouts a selection produces, without building them.
- *
- * Sockets are interchangeable, so this is combinations with repetition: C(gems + sockets - 1, sockets). The panel
- * uses it to show the real cost of an exhaustive run, which is the whole reason it's worth computing separately
- * from buildGemLoadouts - counting is cheap where building the list is not.
+ * Sockets are interchangeable, so this is combinations with repetition: C(gems + sockets - 1, sockets).
  */
 export function countGemLoadouts(gemCount: number, sockets: number): number {
   if (gemCount <= 0 || sockets <= 0) return 0;
-  if (gemCount === 1) return 1;
   let total = 1;
   for (let i = 1; i <= sockets; i++) total = (total * (gemCount - 1 + i)) / i;
   return Math.round(total);
 }
 
-/** How many enchant combinations a selection produces, without building them. */
-export function countEnchantCombinations(enchantChoices: any): number {
-  if (!enchantChoices || typeof enchantChoices !== "object") return 0;
-  const slots = Object.keys(enchantChoices).filter((slot) => Array.isArray(enchantChoices[slot]) && enchantChoices[slot].length > 0);
-  if (slots.length === 0) return 0;
-  return slots.reduce((total, slot) => total * enchantChoices[slot].length, 1);
-}
+export const countEnchantCombinations = (enchantChoices: any): number => countChoiceCombinations(enchantChoices);
 
-/**
- * Expands the player's per-slot enchant selections into every distinct combination.
- * A slot left empty (or on Automatic) contributes nothing and keeps the engine's own pick for that slot.
- */
-export function buildEnchantCombinations(enchantChoices: any, cap: number = MAX_SET_VARIANTS): any[] {
-  if (!enchantChoices || typeof enchantChoices !== "object") return [];
-
-  const slots = Object.keys(enchantChoices).filter((slot) => Array.isArray(enchantChoices[slot]) && enchantChoices[slot].length > 0);
-  if (slots.length === 0) return [];
-
-  // Nothing to expand if every slot has a single pick - that's one combination, not a search.
-  let combinations: any[] = [{}];
-  slots.forEach((slot) => {
-    const next: any[] = [];
-    combinations.forEach((combo) => {
-      enchantChoices[slot].forEach((id: string) => {
-        if (next.length < cap) next.push({ ...combo, [slot]: id });
-      });
-    });
-    combinations = next;
-  });
-
-  return combinations;
-}
+/** Expands the player's per-slot enchant selections into every combination. Empty slots keep the engine's pick. */
+export const buildEnchantCombinations = (enchantChoices: any, cap: number = MAX_SET_VARIANTS): any[] =>
+  buildChoiceCombinations(pinnedSlots(enchantChoices), cap);
 
 /**
  * Pairs every gem loadout with every enchant combination and every Folio combination, capped so a run stays finite.
@@ -456,9 +417,8 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // evaluation take the slice it needs.
   const maxSockets = itemSets.reduce((most: number, set: ItemSet) => Math.max(most, set.itemList.reduce((n: number, item: Item) => n + (item.socket || 0), 0)), 0);
   const variantLimit = resolveVariantLimit(userSettings);
-  // Gems keep their own, tighter default cap - the gem spread is worth a fraction of a percent, so it isn't worth
-  // spending the whole variant budget on. Raising the limit past the default raises this too, since a player
-  // widening the search wants it widened for gems as well.
+  // Raising the limit past the default raises the gem cap too - a player widening the search wants it widened
+  // for gems as well, not just for enchants.
   const gemCap = variantLimit > MAX_SET_VARIANTS ? variantLimit : MAX_GEM_LOADOUTS;
   const gemLoadouts = selectedGems.length > 1 ? buildGemLoadouts(selectedGems, maxSockets, gemCap) : [];
 
@@ -796,32 +756,27 @@ function sumScore(obj: any) {
   return sum;
 }
 
-// Reads the player's per-slot enchant choice. Anything unset or unrecognised falls back to Automatic, which is
-// the pick the engine made before any of this was selectable.
-function getChosenEnchantId(userSettings: any, slot: string, enchantOverride?: any) {
-  let chosenId: string | null = enchantOverride && enchantOverride[slot] ? enchantOverride[slot] : null;
-  if (!chosenId) {
-    const choices = getGearOption(userSettings, "enchantChoices", null);
-    const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
-    chosenId = Array.isArray(forSlot) ? (forSlot.length > 0 ? forSlot[0] : null) : forSlot;
-  }
+/**
+ * The enchant the player pinned for a slot, or undefined for Automatic.
+ *
+ * A variant names one enchant per slot. Failing that we take their own selection, using the first entry when they
+ * pinned several but the run isn't expanding variants.
+ */
+function getPinnedEnchant(userSettings: any, slot: string, enchantOverride?: any) {
+  const choices = getGearOption(userSettings, "enchantChoices", null);
+  const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
+  const chosenId = (enchantOverride && enchantOverride[slot]) || (Array.isArray(forSlot) ? forSlot[0] : forSlot);
+
   return chosenId && chosenId !== "Automatic" ? getEnchantById(chosenId) : undefined;
 }
 
-function getChosenEnchant(userSettings: any, slot: string, spec: string, enchantOverride?: any) {
-  // A variant pins one enchant per slot. Otherwise fall back to the player's selection, taking the first entry
-  // when they picked several but the run isn't expanding variants (single selection behaves as a plain choice).
-  let chosenId: string | null = enchantOverride && enchantOverride[slot] ? enchantOverride[slot] : null;
-  if (!chosenId) {
-    const choices = getGearOption(userSettings, "enchantChoices", null);
-    const forSlot = choices && typeof choices === "object" ? choices[slot] : null;
-    chosenId = Array.isArray(forSlot) ? (forSlot.length > 0 ? forSlot[0] : null) : forSlot;
-  }
-  const chosen = chosenId && chosenId !== "Automatic" ? getEnchantById(chosenId) : undefined;
+/** The enchant a slot ends up with: the player's pick where it's legal, otherwise the spec default. */
+function getSlotEnchant(userSettings: any, slot: string, spec: string, enchantOverride?: any) {
+  const pinned = getPinnedEnchant(userSettings, slot, enchantOverride);
 
-  // A choice that isn't legal on this slot (stale selection after a patch) is ignored rather than dropping the
+  // A pick that isn't legal on this slot (stale selection after a patch) is ignored rather than dropping the
   // enchant entirely, which would silently cost the player stats.
-  if (chosen && chosen.slots.includes(slot)) return chosen;
+  if (pinned && pinned.slots.includes(slot)) return pinned;
   return getDefaultEnchant(slot, spec);
 }
 
@@ -858,7 +813,7 @@ function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, conte
   // isn't worth the extra churn in what the player is told to enchant.
   const highestWeight = getHighestWeight(castModel);
 
-  let ringEnchant = getChosenEnchantId(userSettings, "Finger", enchantOverride);
+  let ringEnchant = getPinnedEnchant(userSettings, "Finger", enchantOverride);
   if (!ringEnchant || !ringEnchant.slots.includes("Finger")) {
     // Automatic: Eyes of the Eagle where the spec uses it, otherwise the enchant matching their best stat.
     ringEnchant = getDefaultEnchant("Finger", spec) ||
@@ -872,14 +827,14 @@ function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, conte
 
   // Armour slots. One entry each today, but they read from the DB so adding options is a data change.
   ["Head", "Chest", "Shoulder", "Legs", "Feet"].forEach((slot) => {
-    const enchant = getChosenEnchant(userSettings, slot, spec, enchantOverride);
+    const enchant = getSlotEnchant(userSettings, slot, spec, enchantOverride);
     applyEnchant(bonus_stats, enchant, highestWeight);
     enchants[slot] = enchant ? enchant.name : "";
   });
 
   // Weapon. Automatic keeps the per-spec default; the secondary enchants are budgeted higher than the intellect
   // one, so this is a real choice rather than a cosmetic one.
-  const weaponEnchant = getChosenEnchant(userSettings, "CombinedWeapon", spec, enchantOverride);
+  const weaponEnchant = getSlotEnchant(userSettings, "CombinedWeapon", spec, enchantOverride);
   applyEnchant(bonus_stats, weaponEnchant, highestWeight);
   const wepEnchantName = weaponEnchant ? weaponEnchant.name : "";
   enchants["CombinedWeapon"] = wepEnchantName;
