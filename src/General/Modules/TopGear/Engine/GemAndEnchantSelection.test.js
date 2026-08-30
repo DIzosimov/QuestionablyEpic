@@ -435,7 +435,9 @@ describe("Search depth is configurable", () => {
     const unlimited = run(cfg({ ...wide, gearVariantLimit: 0 })).itemsCompared;
 
     expect(wider).toBeGreaterThan(capped);
-    expect(unlimited).toBeGreaterThan(wider);
+    // Only >= here: this gear has few enough sockets that 150 already covers the whole space, so lifting the
+    // limit entirely has nothing left to add.
+    expect(unlimited).toBeGreaterThanOrEqual(wider);
   });
 
   test("a wider search never returns a worse set than the capped one", () => {
@@ -729,5 +731,56 @@ describe("Current tier gems are a 16 / 7 split", () => {
     const socketed = run(cfg()).itemSet.enchantBreakdown["Gems"];
     expect(socketed.length).toBeGreaterThan(0);
     expect(socketed).not.toContain(GEM_LOOKUP_FALLBACK);
+  });
+});
+
+/*
+  Close alternatives. Expanding a run into variants means most alternatives now differ from the winner by an
+  enchant, gem or rune rather than by an item - and a differential that only compared items rendered those as a
+  bare score with nothing beside it. Every alternative has to be able to say what it changed.
+*/
+describe("Every close alternative says what it swapped", () => {
+  const swapCount = (d) => d.items.length + d.gems.length + d.enchants.length + d.runes.length;
+
+  test("an enchant-only alternative reports the enchant", () => {
+    const result = run(cfg({ enchantChoices: { CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"] } }));
+    const enchantSwaps = result.differentials.filter((d) => d.enchants.length > 0);
+
+    expect(enchantSwaps.length).toBeGreaterThan(0);
+    enchantSwaps.forEach((d) => {
+      d.enchants.forEach((swap) => {
+        expect(swap.slot).toBeTruthy();
+        expect(swap.name).toBeTruthy();
+      });
+    });
+  });
+
+  test("a rune-only alternative reports the rune by name, not by ID", () => {
+    const result = run(cfg({ folioSlot4: ["Crit", "Haste", "Mastery", "Vers"] }));
+    const runeSwaps = result.differentials.filter((d) => d.runes.length > 0);
+
+    expect(runeSwaps.length).toBeGreaterThan(0);
+    runeSwaps.forEach((d) => d.runes.forEach((rune) => {
+      expect(typeof rune).toEqual("string");
+      expect(rune).not.toMatch(/^\d+$/); // A bare ID means the name lookup failed.
+    }));
+  });
+
+  test("no alternative comes back with nothing to show", () => {
+    // This is the bug the fields exist for: a row with a score and no explanation of what changed.
+    const wide = {
+      selectedGems: [240898, 240890, 240914],
+      enchantChoices: { CombinedWeapon: ["Arcane Mastery", "Berserker's Rage"] },
+      folioSlot4: ["Crit", "Haste"],
+      gearVariantLimit: 0,
+    };
+
+    const differentials = run(cfg(wide)).differentials;
+    expect(differentials.length).toBeGreaterThan(0);
+    differentials.forEach((d) => expect(swapCount(d)).toBeGreaterThan(0));
+  });
+
+  test("a plain run's alternatives still differ by items", () => {
+    run(cfg()).differentials.forEach((d) => expect(swapCount(d)).toBeGreaterThan(0));
   });
 });

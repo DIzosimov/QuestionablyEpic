@@ -187,6 +187,24 @@ export default function TopGear(props: any) {
   // Where the running engine has got to. Null whenever a run isn't in flight, which is what hides the bar.
   const [progress, setProgress] = useState<TopGearProgress | null>(null);
   const runStartedAt = React.useRef(0);
+  const lastProgressAt = React.useRef(0);
+
+  /**
+   * Takes a progress report from the engine, at most ten times a second.
+   *
+   * Every update re-renders this page, and this page draws every item card, so an update is far from free. The
+   * engine reports about a hundred times per run regardless of length - fine over a minute, but on a short run
+   * those land milliseconds apart and cost more than the run they're reporting on. Throttling by time rather than
+   * by count is what keeps a small run small. The final report is always taken so the bar can't freeze short.
+   */
+  const receiveProgress = (update: TopGearProgress) => {
+    const finished = update.total > 0 && update.done >= update.total;
+    const now = performance.now();
+    if (!finished && now - lastProgressAt.current < 100) return;
+
+    lastProgressAt.current = now;
+    setProgress(update);
+  };
   
   const [errorMessage, setErrorMessage] = useState("");
   const patronStatus: string = props.patronStatus;
@@ -556,7 +574,7 @@ export default function TopGear(props: any) {
         baseHPS,
         playerSettings,
         strippedCastModel,
-      }, setProgress)
+      }, receiveProgress)
         .then((result: TopGearResult | null) => { // 
           if (result) {
             // If top gear completes successfully, log a successful run, terminate the worker and then press on to the Report.
@@ -717,6 +735,7 @@ export default function TopGear(props: any) {
       setBtnActive(false);
       setProgress(null);
       runStartedAt.current = performance.now();
+      lastProgressAt.current = 0;
       // Special Error Code
       try {
         unleashWorker();

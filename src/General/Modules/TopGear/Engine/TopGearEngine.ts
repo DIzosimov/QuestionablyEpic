@@ -19,7 +19,7 @@ import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngine
 import Item from "General/Items/Item";
 import { gemDB, getCurrentStatGems, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
 import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
-import { getFolioEffect, getFolioGems, buildFolioCombinations } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getFolioEffect, getFolioGems, buildFolioCombinations, getShortName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
  * == Top Gear Engine ==
@@ -448,13 +448,15 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   const searchedGems = getGemSearchSpace(userSettings);
 
   // Sockets are only known per set, but they're bounded, so build loadouts against the largest set and let each
-  // evaluation take the slice it needs.
+  // evaluation take the slice it needs. Socket 0 is the meta, which is chosen separately, so a loadout only ever
+  // fills the stat sockets - building it a gem longer just produces siblings that differ in an entry nobody reads.
   const maxSockets = itemSets.reduce((most: number, set: ItemSet) => Math.max(most, set.itemList.reduce((n: number, item: Item) => n + (item.socket || 0), 0)), 0);
+  const maxStatSockets = Math.max(0, maxSockets - 1);
   const variantLimit = resolveVariantLimit(userSettings);
   // Raising the limit past the default raises the gem cap too - a player widening the search wants it widened
   // for gems as well, not just for enchants.
   const gemCap = variantLimit > MAX_SET_VARIANTS ? variantLimit : MAX_GEM_LOADOUTS;
-  const gemLoadouts = searchedGems.length > 1 ? buildGemLoadouts(searchedGems, maxSockets, gemCap) : [];
+  const gemLoadouts = searchedGems.length > 1 ? buildGemLoadouts(searchedGems, maxStatSockets, gemCap) : [];
 
   // Enchants can be multi-selected per slot too. Gems and enchants are expanded together into a single list of
   // variants, each of which is a complete, wearable configuration ranked alongside every other set.
@@ -508,9 +510,13 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // and so on if they are already close in strength.
   let differentials = [];
   let primeSet = resultSets[0];
-  for (var k = 1; k < Math.min(CONSTRAINTS.Shared.topGearDifferentials + 1, resultSets.length); k++) {
-    //differentials.push(buildDifferential(itemSets[k], primeSet, newPlayer, contentType));
-    differentials.push(buildDifferential(resultSets[k], primeSet, newPlayer, contentType, newCastModel.modelType[contentType] || "Default"));
+  // Sets that come out wearing exactly what the best set wears are skipped rather than shown: a row with a score
+  // and nothing beside it tells the player nothing. Sets with fewer sockets than the largest one can be gemmed
+  // identically by more than one loadout, so a few of these reach here even with the expansion behaving.
+  for (var k = 1; k < resultSets.length && differentials.length < CONSTRAINTS.Shared.topGearDifferentials; k++) {
+    const differential = buildDifferential(resultSets[k], primeSet, newPlayer, contentType, newCastModel.modelType[contentType] || "Default");
+    const swaps = differential.items.length + differential.gems.length + differential.enchants.length + differential.runes.length;
+    if (swaps > 0) differentials.push(differential);
   }
 
   // == Return sets ==
@@ -713,6 +719,11 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
   } = {
     items: [],
     gems: [],
+    // Enchants and Folio runes an alternative changes. Since sets expand into one candidate per gem, enchant and
+    // rune combination, most close alternatives now differ by one of these and nothing else - and a differential
+    // that only compared items and gems rendered those as an empty row with a score and no explanation.
+    enchants: [] as { slot: string; name: string }[],
+    runes: [] as string[],
     scoreDifference: ((Math.round(primeSet.hardScore - itemSet.hardScore) / primeSet.hardScore) * 100 * modelDiff),
     rawDifference: Math.round(((itemSet.hardScore - primeSet.hardScore) / primeSet.hardScore) * player.getHPS(contentType) * modelDiff),
 
@@ -749,14 +760,32 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
     }
   }
 
-  // Check for gem differences
-  if (primeSet.enchantBreakdown["Gems"] !== itemSet.enchantBreakdown["Gems"]) {
-    itemSet.enchantBreakdown["Gems"].forEach(gem => {
-      if (!(primeSet.enchantBreakdown["Gems"].includes(gem))) {
-        differentials.gems.push(gem);
-      }
-    });
-  }
+  // Check for gem differences. A loadout is a multiset, so two sets can wear the same gems in different numbers -
+  // comparing membership would read "three A one B" against "two A two B" as no difference at all. Count instead,
+  // and report each gem this set wears more of than the best one does.
+  const gemCounts = (gems: number[]) =>
+    gems.reduce((counts: { [gem: number]: number }, gem) => ({ ...counts, [gem]: (counts[gem] || 0) + 1 }), {});
+
+  const primeGemCounts = gemCounts((primeSet.enchantBreakdown["Gems"] as number[]) || []);
+  const diffGemCounts = gemCounts((itemSet.enchantBreakdown["Gems"] as number[]) || []);
+  Object.keys(diffGemCounts).forEach((gem: any) => {
+    if (diffGemCounts[gem] > (primeGemCounts[gem] || 0)) differentials.gems.push(Number(gem));
+  });
+
+  // Check for enchant differences. Every other key in the breakdown is a slot holding one enchant name.
+  Object.keys(itemSet.enchantBreakdown).forEach((slot) => {
+    if (slot === "Gems") return;
+    const chosen = itemSet.enchantBreakdown[slot];
+    if (typeof chosen === "string" && chosen !== primeSet.enchantBreakdown[slot]) {
+      differentials.enchants.push({ slot, name: chosen });
+    }
+  });
+
+  // Check for Omnium Folio differences.
+  const primeRunes: number[] = primeSet.folioGems || [];
+  (itemSet.folioGems || []).forEach((rune: number) => {
+    if (!primeRunes.includes(rune)) differentials.runes.push(getShortName(rune) || String(rune));
+  });
 
   if (diffList.length > primeList.length) {
     differentials.items.push(diffList[diffList.length - 1]);

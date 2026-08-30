@@ -6,6 +6,15 @@ import { useSelector } from "react-redux";
 import WowheadTooltip from "General/Modules/GeneralComponents/WHTooltips.tsx";
 import { reforgeIDs } from "Databases/ReforgeDB";
 
+// Enchant and rune swaps have no icon to show, so they're named instead. Sized to sit level with the item icons.
+const swapChipStyle = {
+  height: 42, minWidth: 76, padding: "2px 6px", borderRadius: 4, fontSize: 11, lineHeight: "13px",
+  border: "1px solid rgba(255,255,255,0.18)", backgroundColor: "rgba(0,0,0,0.35)",
+  display: "flex", flexDirection: "column", justifyContent: "center",
+};
+
+const SWAP_SLOT_LABELS = { CombinedWeapon: "Weapon", Finger: "Rings" };
+
 function CompetitiveAlternatives(props) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.language;
@@ -127,6 +136,24 @@ function CompetitiveAlternatives(props) {
                             </Grid>
                           ));
                         })}
+                        {/* Enchants and Folio runes an alternative swaps. Most close alternatives differ only by
+                            one of these, and without them the row renders as a bare score with nothing to compare. */}
+                        {(key.enchants || []).map((enchant, i) => (
+                          <Grid item key={"enchant" + i}>
+                            <div style={swapChipStyle}>
+                              <span style={{ color: "rgba(255,255,255,0.45)" }}>{SWAP_SLOT_LABELS[enchant.slot] || enchant.slot}</span>
+                              <div style={{ color: "#8ab4f8" }}>{enchant.name}</div>
+                            </div>
+                          </Grid>
+                        ))}
+                        {(key.runes || []).map((rune, i) => (
+                          <Grid item key={"rune" + i}>
+                            <div style={swapChipStyle}>
+                              <span style={{ color: "rgba(255,255,255,0.45)" }}>Folio</span>
+                              <div style={{ color: "#d8a657" }}>{rune}</div>
+                            </div>
+                          </Grid>
+                        ))}
                         {key.gems.map((gem, i) => {
                           let itemArray = [];
                           // 
