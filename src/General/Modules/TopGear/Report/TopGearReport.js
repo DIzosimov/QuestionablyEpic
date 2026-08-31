@@ -36,7 +36,15 @@ import { trackPageView } from "Analytics";
 import TopGearReportTabs from "./TopGearReportTabs";
 import TopGearFolioEntry from "./TopGearFolioEntry";
 
-async function fetchReport(reportCode, setResult, setBackgroundImage) {
+export async function fetchReport(reportCode, setResult, setBackgroundImage, setLoadFailed = () => {}) {
+  // A direct visit to /report/, or a refresh after a run, has no code to load: the path splits to an empty string.
+  // Without this we ask the API for reportID= and get an empty body back, and res.json() turns that into an
+  // uncaught "unexpected end of data" rather than anything the page can show.
+  if (!reportCode) {
+    setLoadFailed(true);
+    return;
+  }
+
   // Check that the reportCode is acceptable.
   /*const requestOptions = {
     method: 'GET',
@@ -47,10 +55,17 @@ async function fetchReport(reportCode, setResult, setBackgroundImage) {
   const url =
     "https://questionablyepic.com/api/getReport.php?reportID=" + reportCode;
 
-  fetch(url)
-    .then((res) => res.json())
-    .then((data) => {
-      //console.log(data);
+  // Returned so a caller - or a test - can wait for the load to finish.
+  return fetch(url)
+    // Read as text first: a missing report comes back with an empty body, which is not JSON.
+    .then((res) => res.text())
+    .then((body) => {
+      if (!body) {
+        console.log("INVALID REPORT");
+        setLoadFailed(true);
+        return;
+      }
+      const data = JSON.parse(body);
 
       if (typeof data === "string") {
         const jsonData = JSON.parse(data);
@@ -64,14 +79,20 @@ async function fetchReport(reportCode, setResult, setBackgroundImage) {
         );
         setResult(JSON.parse(data));
       } else if (typeof data === "object") {
-        if ("status" in data && data.status === "Report not found")
+        if ("status" in data && data.status === "Report not found") {
           console.log("INVALID REPORT");
+          setLoadFailed(true);
+        }
       } else {
         console.error("Invalid Report Data Type");
+        setLoadFailed(true);
       }
+    })
+    // A failed request or a body that isn't JSON shouldn't reach the player as a runtime error overlay.
+    .catch((err) => {
+      console.error("Could not load report " + reportCode, err);
+      setLoadFailed(true);
     });
-
-  //.catch(err => { throw err });
 }
 
 const smallClassIcon = (spec) => {
@@ -116,6 +137,8 @@ function TopGearReport(props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const handleDialogOpen = () => setDialogOpen(true);
   const [backgroundImage, setBackgroundImage] = useState("");
+  // Set when there's no report to load at all, so the page can say so instead of loading indefinitely.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [dialogText, setDialogText] = useState("");
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.language;
@@ -173,7 +196,8 @@ function TopGearReport(props) {
       fetchReport(
         location.pathname.split("/")[2],
         setResult,
-        setBackgroundImage
+        setBackgroundImage,
+        setLoadFailed
       );
     }
   }, []);
@@ -192,9 +216,10 @@ function TopGearReport(props) {
       dialogText,
       setDialogText
     );
+  } else if (loadFailed) {
+    return <div style={{ padding: 24 }}>That report couldn't be loaded. Run Top Gear again to make a new one.</div>;
   } else {
     return <div style={{}}>Loading...</div>;
-    //return fetchReport("pbnzfwyv");
   }
 }
 
