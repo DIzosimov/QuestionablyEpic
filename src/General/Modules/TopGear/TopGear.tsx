@@ -59,6 +59,83 @@ type ShortReport = {
   }
 }
 
+/**
+ * The run's progress bar, deliberately kept apart from the page.
+ *
+ * Progress arrives about a hundred times per worker per stage. Holding it in TopGear's own state meant every
+ * update re-rendered the item bar, the character panel and the gear options panel - and the last of those
+ * recomputes the whole enchant and gem search space to project its combination count. Ten of those a second, on
+ * the one thread the workers are already competing with for cores, is the run paying for its own progress bar.
+ *
+ * The parent pushes updates in through the ref instead, so a report repaints this bar and nothing else.
+ */
+const formatRemaining = (ms: number) => {
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return `~${seconds}s left`;
+  return `~${Math.floor(seconds / 60)}m ${seconds % 60}s left`;
+};
+
+export type ProgressHandle = { update: (p: TopGearProgress) => void; clear: () => void };
+
+const RunProgress = React.forwardRef<ProgressHandle, {}>((_props, ref) => {
+  const [progress, setProgress] = useState<TopGearProgress | null>(null);
+  const lastProgressAt = React.useRef(0);
+  const currentStage = React.useRef("");
+  const stageStartedAt = React.useRef(0);
+
+  React.useImperativeHandle(ref, () => ({
+    /**
+     * Takes a progress report, at most ten times a second.
+     *
+     * The engine reports about a hundred times per stage regardless of length - fine over a minute, but on a short
+     * run those land milliseconds apart. Throttling by time rather than by count is what keeps a small run small.
+     * The final report is always taken so the bar can't freeze short.
+     */
+    update: (incoming: TopGearProgress) => {
+      const finished = incoming.total > 0 && incoming.done >= incoming.total;
+      const now = performance.now();
+      if (!finished && now - lastProgressAt.current < 100) return;
+
+      // Each stage counts something different, so the estimate restarts with it. Carrying the run's elapsed time
+      // into a stage that has only just begun reads as hours remaining for the first few updates.
+      if (incoming.stage !== currentStage.current) {
+        currentStage.current = incoming.stage;
+        stageStartedAt.current = now;
+      }
+
+      lastProgressAt.current = now;
+      setProgress(incoming);
+    },
+    clear: () => {
+      lastProgressAt.current = 0;
+      currentStage.current = "";
+      stageStartedAt.current = performance.now();
+      setProgress(null);
+    },
+  }));
+
+  if (!progress) return null;
+  const { stage, done, total } = progress;
+  // Both stages report a real total; only the moment before the set count is known runs indeterminate.
+  const measured = total > 0;
+  const percent = measured ? Math.min(100, (done / total) * 100) : 0;
+
+  const elapsed = performance.now() - stageStartedAt.current;
+  // Wait for a second of real work before estimating - before that the rate is mostly startup noise.
+  const remaining = measured && done > 0 && elapsed > 1000 ? (elapsed / done) * (total - done) : 0;
+
+  return (
+    <div style={{ width: 300 }}>
+      <Typography variant="caption" style={{ color: "rgba(255,255,255,0.8)", display: "block" }}>
+        {stage}
+        {measured ? ` — ${done.toLocaleString()} / ${total.toLocaleString()} (${Math.round(percent)}%)` : ""}
+        {remaining > 0 ? ` · ${formatRemaining(remaining)}` : ""}
+      </Typography>
+      <LinearProgress variant={measured ? "determinate" : "indeterminate"} value={percent} style={{ height: 6, borderRadius: 3 }} />
+    </div>
+  );
+});
+
 interface ReportItem {
   id: number;
   level: number;
