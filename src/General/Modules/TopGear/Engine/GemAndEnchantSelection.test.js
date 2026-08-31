@@ -366,12 +366,25 @@ describe("The detailed gear options toggle gates the whole section", () => {
 */
 const { resolveVariantLimit, countGemLoadouts, countEnchantCombinations } = require("./TopGearEngine");
 
+// Enough selections that a cap genuinely bites: 24 enchant combinations times a handful of gem loadouts is far
+// past the smaller limits, so a capped run is searching a fraction of the space.
+const WIDE_SELECTION = {
+  selectedGems: [240898, 240890, 240914],
+  enchantChoices: {
+    Chest: ["Mark of the Worldsoul", "Mark of the Magister"],
+    CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"],
+    Finger: ["Nature's Fury", "Zul'jin's Mastery", "Silvermoon's Alacrity", "Silvermoon's Tenacity"],
+  },
+};
+
 describe("Search depth is configurable", () => {
   const A = 240898, B = 240890, C = 240914;
 
-  test("an untouched profile keeps the old default", () => {
-    expect(base.gearVariantLimit.value).toEqual(24);
-    expect(resolveVariantLimit(cfg())).toEqual(24);
+  test("no limit is the default, and the untouched path still caps at 24", () => {
+    expect(base.gearVariantLimit.value).toEqual(0);
+    expect(resolveVariantLimit(cfg())).toEqual(Infinity);
+    // A profile that never opened the gear panel has to run exactly as it did before any of this existed.
+    expect(resolveVariantLimit(cfg({ detailedGearOptions: false }))).toEqual(24);
   });
 
   test("zero means no limit", () => {
@@ -422,39 +435,30 @@ describe("Search depth is configurable", () => {
     expect(countEnchantCombinations(null)).toEqual(0);
   });
 
-  // Enough selections that the default cap genuinely bites: 24 enchant combinations times a handful of gem
-  // loadouts is far past 24 variants, so the capped run is searching a fraction of the space.
-  const wide = {
-    selectedGems: [A, B, C],
-    enchantChoices: {
-      Chest: ["Mark of the Worldsoul", "Mark of the Magister"],
-      CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Acuity of the Ren'dorei"],
-      Finger: ["Nature's Fury", "Zul'jin's Mastery", "Silvermoon's Alacrity", "Silvermoon's Tenacity"],
-    },
-  };
+  const wide = WIDE_SELECTION;
 
   test("raising the limit evaluates strictly more sets, and no limit the most of all", () => {
-    const capped = run(cfg(wide)).itemsCompared;
+    const capped = run(cfg({ ...wide, gearVariantLimit: 24 })).itemsCompared;
     const wider = run(cfg({ ...wide, gearVariantLimit: 150 })).itemsCompared;
     const unlimited = run(cfg({ ...wide, gearVariantLimit: 0 })).itemsCompared;
 
     expect(wider).toBeGreaterThan(capped);
-    // Only >= here: this gear has few enough sockets that 150 already covers the whole space, so lifting the
-    // limit entirely has nothing left to add.
-    expect(unlimited).toBeGreaterThanOrEqual(wider);
+    expect(unlimited).toBeGreaterThan(wider);
   });
 
   test("a wider search never returns a worse set than the capped one", () => {
-    // The point of paying for the extra variants: the winner can only improve.
-    const capped = run(cfg(wide)).itemSet.setHPS;
+    // The point of paying for the extra variants: the winner can only improve. The cap has to be explicit now that
+    // no limit is the default, or this compares a run against itself.
+    const capped = run(cfg({ ...wide, gearVariantLimit: 24 })).itemSet.setHPS;
     const unlimited = run(cfg({ ...wide, gearVariantLimit: 0 })).itemSet.setHPS;
 
     expect(unlimited).toBeGreaterThanOrEqual(capped);
   });
 
-  test("the default run is unchanged by the limit existing", () => {
-    // The old behaviour was a gem cap of 12 inside a total cap of 24. Leaving the setting alone has to reproduce it.
-    expect(run(cfg(wide)).itemsCompared).toEqual(24);
+  test("leaving the limit alone searches everything selected", () => {
+    // The limit is a brake for people who want one, not something you have to find and release first: whatever you
+    // multi-select is what gets searched.
+    expect(run(cfg(wide)).itemsCompared).toEqual(run(cfg({ ...wide, gearVariantLimit: 0 })).itemsCompared);
   });
 });
 
@@ -619,15 +623,21 @@ describe("Optimize Everything searches the lot", () => {
     expect(getFolioSearchSpace(cfg(pinned), 4)).toEqual(["Crit"]);
   });
 
-  test("a run evaluates far more sets than a plain one, up to the search depth", () => {
-    const plain = run(cfg()).itemsCompared;
+  // A full-depth run over every gem, enchant, rune and consumable is the slowest thing in this file, so the tests
+  // below share one rather than paying for it each.
+  let fullRun = null;
+  const searchedEverything = () => (fullRun = fullRun || run(all()));
 
-    expect(run(all()).itemsCompared).toEqual(plain * 24); // The default limit, saturated.
-    expect(run(all({ gearVariantLimit: 150 })).itemsCompared).toEqual(plain * 150);
+  test("it sets its own depth, whatever the depth setting says", () => {
+    // The dropdown is disabled in the panel while this is on, but a value left behind in an older profile mustn't
+    // quietly truncate the search either.
+    expect(resolveVariantLimit(all({ gearVariantLimit: 24 }))).toEqual(Infinity);
+    expect(resolveVariantLimit(all({ gearVariantLimit: 150 }))).toEqual(Infinity);
+    expect(searchedEverything().itemsCompared).toBeGreaterThan(run(cfg()).itemsCompared);
   });
 
   test("the winner is a real set, wearing real gems and enchants", () => {
-    const best = run(all({ gearVariantLimit: 60 })).itemSet;
+    const best = searchedEverything().itemSet;
 
     expect(best).toBeTruthy();
     expect(best.setHPS).toBeGreaterThan(0);
@@ -637,10 +647,16 @@ describe("Optimize Everything searches the lot", () => {
   });
 
   test("it never returns a worse set than the plain run", () => {
-    // A capped search keeps the first N combinations, not the best N, so the engine's automatic pick is entered as
-    // a candidate too. Without that this genuinely loses to the plain run at some limits.
-    [24, 150, 0].forEach((gearVariantLimit) => {
-      expect(run(all({ gearVariantLimit })).itemSet.setHPS).toBeGreaterThanOrEqual(run(cfg()).itemSet.setHPS);
+    expect(searchedEverything().itemSet.setHPS).toBeGreaterThanOrEqual(run(cfg()).itemSet.setHPS);
+  });
+
+  test("a capped search still can't lose to the plain run", () => {
+    // Capping keeps the first N combinations, not the best N, so the engine's automatic pick is entered as a
+    // candidate too. Without that this genuinely loses at some limits. Only reachable through the gear panel now
+    // that Optimize Everything ignores the limit, but it's still reachable.
+    [24, 150].forEach((gearVariantLimit) => {
+      const capped = run(cfg({ ...WIDE_SELECTION, gearVariantLimit })).itemSet.setHPS;
+      expect(capped).toBeGreaterThanOrEqual(run(cfg()).itemSet.setHPS);
     });
   });
 });

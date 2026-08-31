@@ -30,7 +30,7 @@ const DOUBLE_SLOTS = ["Finger", "Trinket"];
 
 const VARIANT_LIMITS = [24, 60, 150, 500, 2000, 0].map((limit) => ({
   value: limit,
-  label: limit === 0 ? "No limit - every combination" : `${limit}${limit === 24 ? " (default)" : ""}`,
+  label: limit === 0 ? "No limit - every combination (default)" : String(limit),
 }));
 
 const gemLabel = (gem: any) => {
@@ -93,7 +93,7 @@ export default function GearOptionsSelector(props: any) {
    * and Folio runes are pinned; picking several there expands the run into one variant per combination.
    */
   const select = (label: string, chosen: any, onChange: (v: any) => void, options: SelectOption[],
-                  opts: { multiple?: boolean; helper?: string; grid?: any } = {}) => {
+                  opts: { multiple?: boolean; helper?: string; grid?: any; disabled?: boolean } = {}) => {
     const chipFor = (value: any) => {
       const option = options.find((o) => o.value === value);
       return option ? (option.chip || option.label) : value;
@@ -103,6 +103,7 @@ export default function GearOptionsSelector(props: any) {
       <Grid item {...(opts.grid || { xs: 12, sm: 6, md: 4, lg: 3 })} key={label}>
         <TextField
           select fullWidth size="small" variant="outlined" label={label} value={chosen} helperText={opts.helper}
+          disabled={opts.disabled}
           style={{ minWidth: 150 }}
           SelectProps={opts.multiple ? {
             multiple: true,
@@ -151,8 +152,8 @@ export default function GearOptionsSelector(props: any) {
     <Grid item xs={12}>
       <Paper elevation={0} style={{ backgroundColor: "rgba(60,45,20,0.6)", padding: "6px 10px" }}>
         <Typography variant="body2" style={{ color: "#f0c674" }}>
-          Optimize Everything is on, so Top Gear searches every gem, enchant and Folio rune itself. The picks below
-          are ignored while it's on - switch it off above to go back to choosing them. Check the search depth.
+          Optimize Everything is on, so Top Gear searches every gem, enchant and Folio rune itself, at full depth.
+          The picks below are ignored while it's on - switch it off above to go back to choosing them.
         </Typography>
       </Paper>
     </Grid>
@@ -160,7 +161,10 @@ export default function GearOptionsSelector(props: any) {
 
   /* ------------------------------- Search depth and its projection ------------------------------ */
   // Built from the same search spaces the engine uses, so the number shown is the number that will actually run.
-  const variantLimit = Number(settingValue("gearVariantLimit", 24));
+  const variantLimit = Number(settingValue("gearVariantLimit", 0));
+  // Optimize Everything overrides the depth in the engine, so the panel has to project the run that will actually
+  // happen rather than the setting sitting underneath it.
+  const searchLimit = optimizeAll ? 0 : variantLimit;
   const sockets = estimateSockets(selectedItems);
   const searchedGems = getGemSearchSpace(playerSettings);
   const gemLoadoutCount = searchedGems.length > 1 ? countGemLoadouts(searchedGems.length, sockets) : 1;
@@ -168,7 +172,7 @@ export default function GearOptionsSelector(props: any) {
   const folioComboCount = Math.max(1, countFolioCombinations(playerSettings));
   const consumableComboCount = Math.max(1, countConsumableCombinations(playerSettings));
   const projected = gemLoadoutCount * enchantComboCount * folioComboCount * consumableComboCount;
-  const evaluated = variantLimit === 0 ? projected : Math.min(projected, variantLimit);
+  const evaluated = searchLimit === 0 ? projected : Math.min(projected, searchLimit);
   // Past a few thousand every gear set is re-evaluated that many times over, which is where runs stop being slow
   // and start being unusable. Worth saying out loud before the player presses the button.
   const heavy = evaluated > 2000;
@@ -184,7 +188,8 @@ export default function GearOptionsSelector(props: any) {
         </Typography>
         <Divider style={{ borderColor: "rgba(255,255,255,0.12)", marginBottom: 10 }} />
         <Grid container spacing={1} alignItems="center">
-          {select("Combinations evaluated", variantLimit, (v) => updateSetting("gearVariantLimit", Number(v)), VARIANT_LIMITS)}
+          {select("Combinations evaluated", searchLimit, (v) => updateSetting("gearVariantLimit", Number(v)), VARIANT_LIMITS,
+                  { disabled: optimizeAll, helper: optimizeAll ? "Set to no limit by Optimize Everything." : undefined })}
           <Grid item xs={12} md={8}>
             <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)", display: "block" }}>
               {searchedGems.length > 1

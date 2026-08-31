@@ -68,7 +68,9 @@ const initialState : RootState = {
     enchantChoices: {value: {}, options: [], category: "enchants", type: "hidden", gameType: "Retail"},
     // How far the gem x enchant expansion is allowed to run. 0 means no limit - every combination is evaluated,
     // which is exhaustive but grows fast, so the panel shows the projected count before a run.
-    gearVariantLimit: {value: 24, options: [24, 60, 150, 500, 2000, 0], category: "gems", type: "hidden", gameType: "Retail"},
+    // No limit by default: an untouched profile expands nothing, so this only bites once the player multi-selects,
+    // and at that point they've asked for those combinations and should get all of them.
+    gearVariantLimit: {value: 0, options: [24, 60, 150, 500, 2000, 0], category: "gems", type: "hidden", gameType: "Retail"},
     // Flasks and food are searchable too. Empty means the single choice in the consumables settings below stands,
     // which is what an untouched profile has, so nothing changes until the player pins something.
     flaskChoices: {value: [], options: ["Haste", "Crit", "Mastery", "Versatility"], category: "consumables", type: "hidden", gameType: "Retail"},

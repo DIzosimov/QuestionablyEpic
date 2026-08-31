@@ -268,6 +268,10 @@ const MAX_SET_VARIANTS = 24;
  * proportion, since the count is multiplicative and every variant re-evaluates every gear set.
  */
 export function resolveVariantLimit(userSettings: any): number {
+  // Optimize Everything means "search all of it", so it sets its own depth. Leaving it to a separate dropdown just
+  // meant the switch quietly delivered a truncated search unless you knew to go and raise that too.
+  if (isOptimizeAllGear(userSettings)) return Infinity;
+
   const raw = getGearOption(userSettings, "gearVariantLimit", MAX_SET_VARIANTS);
   // The settings panel writes number fields through as strings.
   const limit = typeof raw === "string" ? parseInt(raw, 10) : raw;
