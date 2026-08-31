@@ -61,6 +61,84 @@ type ShortReport = {
 // The stages a run moves through, in order. Used to work out which shards are far enough along to be summed.
 const STAGE_ORDER = ["Building gear sets", "Evaluating sets", "Ranking results"];
 
+
+/**
+ * The run's progress bar, deliberately kept apart from the page.
+ *
+ * Progress arrives about a hundred times per worker per stage. Holding it in TopGear's own state meant every
+ * update re-rendered the item bar, the character panel and the gear options panel - and the last of those
+ * recomputes the whole enchant and gem search space to project its combination count. Ten of those a second, on
+ * the one thread the workers are already competing with for cores, is the run paying for its own progress bar.
+ *
+ * The parent pushes updates in through the ref instead, so a report repaints this bar and nothing else.
+ */
+const formatRemaining = (ms: number) => {
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return `~${seconds}s left`;
+  return `~${Math.floor(seconds / 60)}m ${seconds % 60}s left`;
+};
+
+export type ProgressHandle = { update: (p: TopGearProgress) => void; clear: () => void };
+
+const RunProgress = React.forwardRef<ProgressHandle, {}>((_props, ref) => {
+  const [progress, setProgress] = useState<TopGearProgress | null>(null);
+  const lastProgressAt = React.useRef(0);
+  const currentStage = React.useRef("");
+  const stageStartedAt = React.useRef(0);
+
+  React.useImperativeHandle(ref, () => ({
+    /**
+     * Takes a progress report, at most ten times a second.
+     *
+     * The engine reports about a hundred times per stage regardless of length - fine over a minute, but on a short
+     * run those land milliseconds apart. Throttling by time rather than by count is what keeps a small run small.
+     * The final report is always taken so the bar can't freeze short.
+     */
+    update: (incoming: TopGearProgress) => {
+      const finished = incoming.total > 0 && incoming.done >= incoming.total;
+      const now = performance.now();
+      if (!finished && now - lastProgressAt.current < 100) return;
+
+      // Each stage counts something different, so the estimate restarts with it. Carrying the run's elapsed time
+      // into a stage that has only just begun reads as hours remaining for the first few updates.
+      if (incoming.stage !== currentStage.current) {
+        currentStage.current = incoming.stage;
+        stageStartedAt.current = now;
+      }
+
+      lastProgressAt.current = now;
+      setProgress(incoming);
+    },
+    clear: () => {
+      lastProgressAt.current = 0;
+      currentStage.current = "";
+      stageStartedAt.current = performance.now();
+      setProgress(null);
+    },
+  }));
+
+  if (!progress) return null;
+  const { stage, done, total } = progress;
+  // Both stages report a real total; only the moment before the set count is known runs indeterminate.
+  const measured = total > 0;
+  const percent = measured ? Math.min(100, (done / total) * 100) : 0;
+
+  const elapsed = performance.now() - stageStartedAt.current;
+  // Wait for a second of real work before estimating - before that the rate is mostly startup noise.
+  const remaining = measured && done > 0 && elapsed > 1000 ? (elapsed / done) * (total - done) : 0;
+
+  return (
+    <div style={{ width: 300 }}>
+      <Typography variant="caption" style={{ color: "rgba(255,255,255,0.8)", display: "block" }}>
+        {stage}
+        {measured ? ` — ${done.toLocaleString()} / ${total.toLocaleString()} (${Math.round(percent)}%)` : ""}
+        {remaining > 0 ? ` · ${formatRemaining(remaining)}` : ""}
+      </Typography>
+      <LinearProgress variant={measured ? "determinate" : "indeterminate"} value={percent} style={{ height: 6, borderRadius: 3 }} />
+    </div>
+  );
+});
+
 interface ReportItem {
   id: number;
   level: number;
@@ -190,36 +268,11 @@ export default function TopGear(props: any) {
   const [itemList, setItemList] = useState(props.player.getActiveItems(activeSlot));
   const [btnActive, setBtnActive] = useState<boolean>(true);
   // Where the running engine has got to. Null whenever a run isn't in flight, which is what hides the bar.
-  const [progress, setProgress] = useState<TopGearProgress | null>(null);
-  const runStartedAt = React.useRef(0); // When the whole run began. The estimate uses the per-stage clock below.
-  const lastProgressAt = React.useRef(0);
-  // The stage the bar is currently showing, and when it started, so the estimate is per stage rather than per run.
-  const currentStage = React.useRef("");
-  const stageStartedAt = React.useRef(0);
+  const runStartedAt = React.useRef(0); // When the whole run began.
+  // The bar keeps its own state, so reporting progress repaints it without re-rendering this page.
+  const progressBar = React.useRef<ProgressHandle>(null);
 
-  /**
-   * Takes a progress report from the engine, at most ten times a second.
-   *
-   * Every update re-renders this page, and this page draws every item card, so an update is far from free. The
-   * engine reports about a hundred times per run regardless of length - fine over a minute, but on a short run
-   * those land milliseconds apart and cost more than the run they're reporting on. Throttling by time rather than
-   * by count is what keeps a small run small. The final report is always taken so the bar can't freeze short.
-   */
-  const receiveProgress = (update: TopGearProgress) => {
-    const finished = update.total > 0 && update.done >= update.total;
-    const now = performance.now();
-    if (!finished && now - lastProgressAt.current < 100) return;
-
-    // Each stage counts something different, so the estimate restarts with it. Carrying the run's elapsed time
-    // into a stage that has only just begun reads as hours remaining for the first few updates.
-    if (update.stage !== currentStage.current) {
-      currentStage.current = update.stage;
-      stageStartedAt.current = now;
-    }
-
-    lastProgressAt.current = now;
-    setProgress(update);
-  };
+  const receiveProgress = (update: TopGearProgress) => progressBar.current?.update(update);
 
   // Each shard only knows about its own slice, so the bar adds them up. Shards count different things in different
   // stages, so only those in the same stage are summed - the run is as far along as its slowest worker, and mixing
@@ -647,7 +700,7 @@ export default function TopGear(props: any) {
           else { // A valid set was not returned.
             setErrorMessage("Top Gear has crashed. So sorry! It's been automatically reported.");
             console.log("Null Set Returned");
-            setProgress(null);
+            progressBar.current?.clear();
             setBtnActive(true);
           }
         })
@@ -656,7 +709,7 @@ export default function TopGear(props: any) {
           reportError("", "Top Gear Crash", err, strippedPlayer.spec);
           setErrorMessage("Top Gear has crashed. So sorry! It's been automatically reported.");
           console.log(err);
-          setProgress(null);
+          progressBar.current?.clear();
           setBtnActive(true);
         });
     } else if (gameType === "Classic") {
@@ -791,12 +844,8 @@ export default function TopGear(props: any) {
     /* ----------------------- Call to the Top Gear Engine. Lock the app down. ---------------------- */
     if (checkTopGearValid()) {
       setBtnActive(false);
-      setProgress(null);
+      progressBar.current?.clear();
       runStartedAt.current = performance.now();
-      lastProgressAt.current = 0;
-      // A fresh run starts in no stage, so the first report of each stage sets its own clock.
-      currentStage.current = "";
-      stageStartedAt.current = performance.now();
       // Special Error Code
       try {
         unleashWorker();
@@ -804,7 +853,7 @@ export default function TopGear(props: any) {
         setErrorMessage("Top Gear has crashed. Sorry! It's been automatically reported.");
         reportError("", "Top Gear Full Crash", err, JSON.stringify(props.player) || "");
         console.log(err);
-        setProgress(null);
+        progressBar.current?.clear();
         setBtnActive(true);
       }
     }
@@ -816,35 +865,6 @@ export default function TopGear(props: any) {
   // A run can take anywhere from a second to several minutes depending on how many items are selected and how
   // wide the gem / enchant / rune search is, and until now the button just went grey. The engine reports its
   // progress about a hundred times over a run, which is enough to both fill a bar and estimate what's left.
-
-  const formatRemaining = (ms: number) => {
-    const seconds = Math.ceil(ms / 1000);
-    if (seconds < 60) return `~${seconds}s left`;
-    return `~${Math.floor(seconds / 60)}m ${seconds % 60}s left`;
-  };
-
-  const renderProgress = () => {
-    if (!progress) return null;
-    const { stage, done, total } = progress;
-    // Both stages report a real total; only the moment before the set count is known runs indeterminate.
-    const measured = total > 0;
-    const percent = measured ? Math.min(100, (done / total) * 100) : 0;
-
-    const elapsed = performance.now() - stageStartedAt.current;
-    // Wait for a second of real work before estimating - before that the rate is mostly startup noise.
-    const remaining = measured && done > 0 && elapsed > 1000 ? (elapsed / done) * (total - done) : 0;
-
-    return (
-      <div style={{ width: 300 }}>
-        <Typography variant="caption" style={{ color: "rgba(255,255,255,0.8)", display: "block" }}>
-          {stage}
-          {measured ? ` — ${done.toLocaleString()} / ${total.toLocaleString()} (${Math.round(percent)}%)` : ""}
-          {remaining > 0 ? ` · ${formatRemaining(remaining)}` : ""}
-        </Typography>
-        <LinearProgress variant={measured ? "determinate" : "indeterminate"} value={percent} style={{ height: 6, borderRadius: 3 }} />
-      </div>
-    );
-  };
 
   const changeReforgeFrom = (buttonClicked: "string") => {
     if (reforgeFromList.includes(buttonClicked)) {
@@ -1006,7 +1026,7 @@ export default function TopGear(props: any) {
           <Typography variant="subtitle1" align="center" style={{ padding: "2px 2px 2px 2px", marginRight: "5px" }} color="primary">
               {getErrorMessage()}
             </Typography>
-          {renderProgress()}
+          <RunProgress ref={progressBar} />
           <div>
             <Button 
               variant="contained" 
