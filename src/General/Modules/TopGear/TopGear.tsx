@@ -605,7 +605,9 @@ export default function TopGear(props: any) {
       // Gear sets are evaluated independently, so the run splits cleanly across workers. Each builds the same sets
       // and evaluates a disjoint slice of them, and finishTopGear merges their rankings into one report - see the
       // sharding tests for why the merged result is the same one a single thread produces.
-      const shardCount = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 4));
+      // One core is left for this thread so drawing the progress bar never competes with a worker for it. Both
+      // stages shard now, so more workers is a real gain rather than more copies of the same build.
+      const shardCount = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
       shardProgress.current = [];
 
       Promise.all(Array.from({ length: shardCount }, (_unused, index) =>

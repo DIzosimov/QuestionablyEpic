@@ -513,7 +513,7 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   // == Create Valid Item Sets ==
   // This just builds a set and adds it to our array so that we can score it later.
   // A valid set is just any combination of items that is wearable in-game. Item limits like on legendaries, unique items and so on are all adhered to.
-  let itemSets = createSets(itemList, wepCombos, player.spec, report);
+  let itemSets = createSets(itemList, wepCombos, player.spec, report, shard);
   // Retaining every evaluation is what used to make a large run die rather than finish: each scored set holds about
   // 2kb, so a few million of them exhaust the worker heap long before the run ends. Only the top slice is ever read.
   const rankedSets = new TopSets(softSlice);
@@ -584,11 +584,11 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
 
   // Evaluations, not sets: with variants a single set is scored once per configuration, and that multiplier is
   // exactly what makes a run long enough to need a progress bar in the first place.
-  // Sets are dealt out round robin rather than in blocks: neighbouring sets are near-identical in build order, so
-  // a block split hands one worker all the good sets and leaves another with nothing worth keeping. Round robin
-  // gives every shard the same spread of quality, which matters because each keeps only its own top slice.
-  const myItemSets = shard.count > 1 ? itemSets.filter((set: ItemSet, index: number) => index % shard.count === shard.index) : itemSets;
-  const totalEvaluations = myItemSets.length * variants.length;
+  // createSets already handed back just this shard's sets, dealt out round robin rather than in blocks:
+  // neighbouring sets are near-identical in build order, so a block split would hand one worker all the good sets
+  // and leave another with nothing worth keeping. Round robin gives every shard the same spread of quality, which
+  // matters because each keeps only its own top slice.
+  const totalEvaluations = itemSets.length * variants.length;
   // Report ~100 times over the run, so the bar moves smoothly without the postMessage traffic becoming the cost.
   const reportEvery = Math.max(1, Math.floor(totalEvaluations / 100));
   let evaluated = 0;
@@ -597,10 +597,10 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   // next boundary rather than landing exactly on a multiple of it.
   let nextReport = reportEvery;
 
-  for (var i = 0; i < myItemSets.length; i++) {
+  for (var i = 0; i < itemSets.length; i++) {
     for (var v = 0; v < variants.length; v++) {
       const variant = variants[v];
-      const scoredSet = evalSet(myItemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
+      const scoredSet = evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
                                 variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined,
                                 variant.consumableOverride || undefined);
 
@@ -621,7 +621,7 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
 
   report({ stage: "Ranking results", done: totalEvaluations, total: totalEvaluations });
 
-  return { rankedSets: rankedSets.toArray(), setsBuilt: myItemSets.length, embellishedSelected, equippedHPS };
+  return { rankedSets: rankedSets.toArray(), setsBuilt: itemSets.length, embellishedSelected, equippedHPS };
 }
 
 /**
@@ -709,7 +709,8 @@ const countPairs = (items: Item[], canPair: (a: Item, b: Item) => boolean) => {
   return pairs;
 };
 
-function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report: TopGearProgressCallback = () => {}) {
+function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report: TopGearProgressCallback = () => {},
+                    shard: TopGearShard = WHOLE_RUN) {
   const wepCombos = deepCopyFunction(rawWepCombos);
  
   let setCount = 0;
@@ -761,9 +762,13 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report
     .reduce((total, slot) => total * slotLengths[slot], 1)
     * countPairs(splitItems.Finger, ringsCanPair)
     * countPairs(splitItems.Trinket, trinketsCanPair);
+  // A shard builds only its own sets. Every shard still walks the whole combination space - that's just index
+  // arithmetic - but skips assembling the item list, scoring it and allocating an ItemSet for the sets it doesn't
+  // own, which is nearly all of the cost.
+  const myTotal = Math.floor(totalSets / shard.count) + (shard.index < totalSets % shard.count ? 1 : 0);
   // Report about a hundred times over the build, matching the evaluation stage.
-  const reportEvery = Math.max(1, Math.floor(totalSets / 100));
-  report({ stage: "Building gear sets", done: 0, total: totalSets });
+  const reportEvery = Math.max(1, Math.floor(myTotal / 100));
+  report({ stage: "Building gear sets", done: 0, total: myTotal });
 
   for (var head = 0; head < slotLengths.Head; head++) {
     let softScore = { head: splitItems.Head[head].softScore,
@@ -829,29 +834,33 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report
                                   softScore.trinket2 = splitItems.Trinket[trinket2].softScore;
 
                                   if (trinket < trinket2 && trinketsCanPair(splitItems.Trinket[trinket], splitItems.Trinket[trinket2])) {
-                                    let includedItems = [
-                                      splitItems.Head[head],
-                                      splitItems.Neck[neck],
-                                      splitItems.Shoulder[shoulder],
-                                      splitItems.Back[back],
-                                      splitItems.Chest[chest],
-                                      splitItems.Wrist[wrist],
-                                      splitItems.Hands[hands],
-                                      splitItems.Waist[waist],
-                                      splitItems.Legs[legs],
-                                      splitItems.Feet[feet],
-                                      splitItems.Finger[finger],
-                                      splitItems.Finger[finger2],
-                                      splitItems.Trinket[trinket],
-                                      splitItems.Trinket[trinket2],
-                                      wepCombos[weapon][0]
-                                    ];
-                                    if (wepCombos[weapon].length > 1) includedItems.push(wepCombos[weapon][1])
-                                    //console.log(JSON.stringify(wepCombos[weapon]));
-                                    let sumSoft = sumScore(softScore);
-                                    itemSets.push(new ItemSet(setCount, includedItems, sumSoft, spec));
+                                    // The set's index across the whole run, so ids match an unsharded build and the
+                                    // shards divide the sets between them without overlap or gaps.
+                                    if (setCount % shard.count === shard.index) {
+                                      let includedItems = [
+                                        splitItems.Head[head],
+                                        splitItems.Neck[neck],
+                                        splitItems.Shoulder[shoulder],
+                                        splitItems.Back[back],
+                                        splitItems.Chest[chest],
+                                        splitItems.Wrist[wrist],
+                                        splitItems.Hands[hands],
+                                        splitItems.Waist[waist],
+                                        splitItems.Legs[legs],
+                                        splitItems.Feet[feet],
+                                        splitItems.Finger[finger],
+                                        splitItems.Finger[finger2],
+                                        splitItems.Trinket[trinket],
+                                        splitItems.Trinket[trinket2],
+                                        wepCombos[weapon][0]
+                                      ];
+                                      if (wepCombos[weapon].length > 1) includedItems.push(wepCombos[weapon][1])
+                                      //console.log(JSON.stringify(wepCombos[weapon]));
+                                      let sumSoft = sumScore(softScore);
+                                      itemSets.push(new ItemSet(setCount, includedItems, sumSoft, spec));
+                                      if (itemSets.length % reportEvery === 0) report({ stage: "Building gear sets", done: itemSets.length, total: myTotal });
+                                    }
                                     setCount++;
-                                    if (setCount % reportEvery === 0) report({ stage: "Building gear sets", done: setCount, total: totalSets });
                                   }
                                 }
                               }
@@ -872,7 +881,7 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report
 
   // The throttled reports above land on multiples of reportEvery, so the last one stops short of the total. Say so
   // explicitly rather than leaving the stage sitting at 99% while it hands over.
-  report({ stage: "Building gear sets", done: setCount, total: totalSets });
+  report({ stage: "Building gear sets", done: itemSets.length, total: myTotal });
 
   return itemSets;
 }
