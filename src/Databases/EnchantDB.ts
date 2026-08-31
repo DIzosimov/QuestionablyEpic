@@ -19,6 +19,10 @@ export type EnchantEntry = {
   isDefaultFor?: string[]; // specs this is the automatic pick for
 };
 
+// Some enchants have no stat of their own - they grant their budget to whichever secondary the spec values most.
+// Use this as the stat key and the engine resolves it per spec at evaluation time.
+export const BEST_SECONDARY = "bestSecondary";
+
 // Weapon enchants proc, and the engine has always valued them at 3 PPM over a 15s window.
 export const WEAPON_ENCHANT_PPM = 3;
 export const WEAPON_ENCHANT_DURATION = 15;
@@ -31,9 +35,9 @@ export const enchantDB: EnchantEntry[] = [
   { id: "Nature's Fury", name: "Nature's Fury", slots: ["Finger"], stats: { crit: 29 } },
   { id: "Zul'jin's Mastery", name: "Zul'jin's Mastery", slots: ["Finger"], stats: { mastery: 29 } },
   { id: "Silvermoon's Tenacity", name: "Silvermoon's Tenacity", slots: ["Finger"], stats: { versatility: 29 } },
-  // Eyes of the Eagle is the name these two specs see. It grants the same budget, applied to their best stat,
-  // which is why it has no fixed stat of its own.
-  { id: "Eyes of the Eagle", name: "Eyes of the Eagle", slots: ["Finger"],
+  // Eyes of the Eagle is the name these two specs see. It grants the same budget as the others, applied to their
+  // best stat rather than a fixed one.
+  { id: "Eyes of the Eagle", name: "Eyes of the Eagle", slots: ["Finger"], stats: { [BEST_SECONDARY]: 29 },
     specRestriction: ["Holy Priest", "Restoration Shaman"], isDefaultFor: ["Holy Priest", "Restoration Shaman"] },
 
   /* -------------------------------------------- Head ------------------------------------------- */
@@ -60,6 +64,10 @@ export const enchantDB: EnchantEntry[] = [
     procStats: { haste: 124 }, isDefaultFor: ["Discipline Priest", "Restoration Druid"] },
   { id: "Arcane Mastery", name: "Arcane Mastery", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
     procStats: { mastery: 124 }, isDefaultFor: ["Preservation Evoker"] },
+  // Grants a random secondary, favouring the highest while above 80% health. Healers sit above that nearly all
+  // the time, so it's valued as landing on the best secondary every proc.
+  { id: "Rite of the Hash'ey", name: "Rite of the Hash'ey", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+    procStats: { [BEST_SECONDARY]: 139 } },
 ];
 
 /**

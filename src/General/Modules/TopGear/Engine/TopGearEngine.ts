@@ -19,7 +19,7 @@ import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngine
 import Item from "General/Items/Item";
 import { gemDB, getCurrentStatGems, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
 import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, RING_SLOTS, enchantSlotSource,
-         WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
+         WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION, BEST_SECONDARY } from "Databases/EnchantDB";
 import { getFolioEffect, getFolioGems, buildFolioCombinations, countFolioCombinations, getShortName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
@@ -1129,23 +1129,19 @@ function getSlotEnchant(userSettings: any, slot: string, spec: string, enchantOv
 function applyEnchant(bonus_stats: Stats, enchant: any, highestWeight: string) {
   if (!enchant) return;
 
-  if (enchant.stats) {
-    Object.keys(enchant.stats).forEach((stat) => {
-      bonus_stats[stat as keyof Stats] = (bonus_stats[stat as keyof Stats] || 0) + enchant.stats[stat];
-    });
-  }
+  // An enchant that grants "your highest secondary" rather than a named one is stored against BEST_SECONDARY and
+  // resolved here, since which stat that is depends on the spec being evaluated.
+  const add = (stat: string, amount: number) => {
+    const key = (stat === BEST_SECONDARY ? highestWeight : stat) as keyof Stats;
+    bonus_stats[key] = (bonus_stats[key] || 0) + amount;
+  };
+
+  if (enchant.stats) Object.keys(enchant.stats).forEach((stat) => add(stat, enchant.stats[stat]));
   if (enchant.procStats) {
     const uptime = convertPPMToUptime(WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION);
-    Object.keys(enchant.procStats).forEach((stat) => {
-      bonus_stats[stat as keyof Stats] = (bonus_stats[stat as keyof Stats] || 0) + enchant.procStats[stat] * uptime;
-    });
+    Object.keys(enchant.procStats).forEach((stat) => add(stat, enchant.procStats[stat] * uptime));
   }
   if (enchant.manaPerc) bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * enchant.manaPerc;
-
-  // Eyes of the Eagle carries no stat of its own - it grants the standard ring budget to the best stat.
-  if (!enchant.stats && !enchant.procStats && enchant.slots.includes("Finger")) {
-    bonus_stats[highestWeight as keyof Stats] = (bonus_stats[highestWeight as keyof Stats] || 0) + 29;
-  }
 }
 
 function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string, userSettings: any = {}, enchantOverride?: any) {

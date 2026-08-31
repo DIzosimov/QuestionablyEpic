@@ -1313,3 +1313,51 @@ describe("A run can be sized before it is built", () => {
     expect(capped).toEqual(countGearSets(p.activeItems, wepCombos) * 24);
   });
 });
+
+/*
+  Enchants that grant "your highest secondary" rather than a named stat. Which stat that is depends on the spec,
+  so the database stores a marker and the engine resolves it while evaluating. Rite of the Hash'ey is the weapon
+  enchant that works this way; Eyes of the Eagle is the ring one, and used to be hardcoded in the engine.
+*/
+describe("Enchants that grant your best secondary", () => {
+  const { getEnchantById, BEST_SECONDARY } = require("Databases/EnchantDB");
+  const SPEC_BEST = "mastery"; // Preservation Evoker's highest weighted secondary, per getHighestWeight.
+
+  test("Rite of the Hash'ey is a weapon enchant granting the marker, not a fixed stat", () => {
+    const rite = getEnchantById("Rite of the Hash'ey");
+
+    expect(rite).toBeTruthy();
+    expect(rite.slots).toContain("CombinedWeapon");
+    expect(rite.procStats).toEqual({ [BEST_SECONDARY]: 139 });
+  });
+
+  test("choosing it lands the proc on the spec's best secondary", () => {
+    const chosen = run(cfg({ enchantChoices: { CombinedWeapon: ["Rite of the Hash'ey"] } }));
+    const other = run(cfg({ enchantChoices: { CombinedWeapon: ["Arcane Mastery"] } }));
+
+    expect(chosen.itemSet.enchantBreakdown["CombinedWeapon"]).toEqual("Rite of the Hash'ey");
+    // Budgeted above the 124 fixed enchants, so on the stat the spec values most it has to come out ahead.
+    expect(chosen.itemSet.setStats[SPEC_BEST]).toBeGreaterThan(other.itemSet.setStats[SPEC_BEST]);
+  });
+
+  test("the marker never leaks into the set's stats as a stat of its own", () => {
+    const chosen = run(cfg({ enchantChoices: { CombinedWeapon: ["Rite of the Hash'ey"] } }));
+
+    expect(chosen.itemSet.setStats[BEST_SECONDARY]).toBeUndefined();
+  });
+
+  test("searching the weapon slot can pick it over the fixed enchants", () => {
+    const searched = run(cfg({
+      enchantChoices: { CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Rite of the Hash'ey"] },
+    }));
+
+    expect(["Arcane Mastery", "Berserker's Rage", "Rite of the Hash'ey"])
+      .toContain(searched.itemSet.enchantBreakdown["CombinedWeapon"]);
+  });
+
+  test("Eyes of the Eagle still grants the ring budget to the best stat", () => {
+    // It moved from a hardcoded branch in the engine to the same marker, so its value must not have moved with it.
+    const eagle = getEnchantById("Eyes of the Eagle");
+    expect(eagle.stats).toEqual({ [BEST_SECONDARY]: 29 });
+  });
+});
