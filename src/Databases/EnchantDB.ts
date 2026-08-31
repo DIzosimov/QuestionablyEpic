@@ -37,18 +37,18 @@ export const enchantDB: EnchantEntry[] = [
   // a set wears two and each is applied separately, so a set running the same enchant on both gets twice this.
   { id: "Silvermoon's Alacrity", name: "Silvermoon's Alacrity", enchantID: 8025, slots: ["Finger"], stats: { haste: 29 } },
   { id: "Nature's Fury", name: "Nature's Fury", enchantID: 7997, slots: ["Finger"], stats: { crit: 29 } },
-  { id: "Zul'jin's Mastery", name: "Zul'jin's Mastery", slots: ["Finger"], stats: { mastery: 29 } },
-  { id: "Silvermoon's Tenacity", name: "Silvermoon's Tenacity", slots: ["Finger"], stats: { versatility: 29 } },
+  { id: "Zul'jin's Mastery", name: "Zul'jin's Mastery", enchantID: 7969, slots: ["Finger"], stats: { mastery: 29 } },
+  { id: "Silvermoon's Tenacity", name: "Silvermoon's Tenacity", enchantID: 8027, slots: ["Finger"], stats: { versatility: 29 } },
   // Eyes of the Eagle is the name these two specs see. It grants the same budget as the others, applied to their
   // best stat rather than a fixed one.
-  { id: "Eyes of the Eagle", name: "Eyes of the Eagle", slots: ["Finger"], stats: { [BEST_SECONDARY]: 29 },
+  { id: "Eyes of the Eagle", name: "Eyes of the Eagle", enchantID: 7967, slots: ["Finger"], stats: { [BEST_SECONDARY]: 29 },
     specRestriction: ["Holy Priest", "Restoration Shaman"], isDefaultFor: ["Holy Priest", "Restoration Shaman"] },
 
   /* -------------------------------------------- Head ------------------------------------------- */
   { id: "Empowered Hex of Leeching", name: "Empowered Hex of Leeching", enchantID: 7961, slots: ["Head"], stats: { leech: 55 } },
 
   /* ------------------------------------------- Chest ------------------------------------------- */
-  { id: "Mark of the Worldsoul", name: "Mark of the Worldsoul", slots: ["Chest"], stats: { intellect: 50 } },
+  { id: "Mark of the Worldsoul", name: "Mark of the Worldsoul", enchantID: 7987, slots: ["Chest"], stats: { intellect: 50 } },
   { id: "Mark of the Magister", name: "Mark of the Magister", enchantID: 8013, slots: ["Chest"], stats: { intellect: 40 }, manaPerc: 1.05,
     isDefaultFor: ["Restoration Shaman"] },
 
@@ -62,13 +62,13 @@ export const enchantDB: EnchantEntry[] = [
   { id: "Shaladrassil's Roots", name: "Shaladrassil's Roots", enchantID: 7993, slots: ["Feet"], stats: { leech: 28 } },
 
   /* ------------------------------------------ Weapon ------------------------------------------- */
-  { id: "Acuity of the Ren'dorei", name: "Acuity of the Ren'dorei", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+  { id: "Acuity of the Ren'dorei", name: "Acuity of the Ren'dorei", enchantID: 8039, slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
     procStats: { intellect: 67 } },
-  { id: "Berserker's Rage", name: "Berserker's Rage", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+  { id: "Berserker's Rage", name: "Berserker's Rage", enchantID: 7983, slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
     procStats: { haste: 124 }, isDefaultFor: ["Discipline Priest", "Restoration Druid"] },
-  { id: "Arcane Mastery", name: "Arcane Mastery", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+  { id: "Arcane Mastery", name: "Arcane Mastery", enchantID: 8041, slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
     procStats: { mastery: 124 }, isDefaultFor: ["Preservation Evoker"] },
-  { id: "Worldsoul Tenacity", name: "Worldsoul Tenacity", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+  { id: "Worldsoul Tenacity", name: "Worldsoul Tenacity", enchantID: 8011, slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
     procStats: { versatility: 124 } },
   // Grants a random secondary, favouring the highest while above 80% health. Healers sit above that nearly all
   // the time, so it's valued as landing on the best secondary every proc.
@@ -100,9 +100,30 @@ export const getDefaultEnchant = (slot: string, spec: string): EnchantEntry | un
 
 export const getEnchantById = (id: string): EnchantEntry | undefined => enchantDB.find((e) => e.id === id);
 
-/** The enchant an imported character is wearing, from SimC's enchant_id. Undefined when we don't know that id. */
-export const getEnchantByEnchantID = (enchantID: number): EnchantEntry | undefined =>
-  enchantID > 0 ? enchantDB.find((e) => e.enchantID === enchantID) : undefined;
+// Weapon enchants that exist but aren't worth a healer's slot, so they're deliberately not offered or searched.
+// Naming them anyway means a character wearing one is recognised rather than reading as unknown, which is the
+// difference between the report saying "swap this" and saying nothing at all.
+const UNMODELLED_ENCHANTS: { [enchantID: number]: string } = {
+  7979: "Strength of Halazzi",
+  7981: "Jan'alai's Precision",
+  8007: "Worldsoul Cradle",
+  8009: "Worldsoul Aegis",
+  8037: "Flames of the Sin'dorei",
+};
+
+/**
+ * The enchant an imported character is wearing, from SimC's enchant_id. Undefined when the id isn't one we know,
+ * which the report treats as "can't tell" rather than as a change.
+ */
+export const getEnchantByEnchantID = (enchantID: number): EnchantEntry | undefined => {
+  if (!enchantID || enchantID <= 0) return undefined;
+
+  const modelled = enchantDB.find((e) => e.enchantID === enchantID);
+  if (modelled) return modelled;
+
+  const name = UNMODELLED_ENCHANTS[enchantID];
+  return name ? { id: name, name, slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"], enchantID } : undefined;
+};
 
 /** Slots the player can choose an enchant for, in the order they're shown. */
 export const ENCHANTABLE_SLOTS = ["Head", "Shoulder", "Chest", "Legs", "Feet", ...RING_SLOTS, "CombinedWeapon"];

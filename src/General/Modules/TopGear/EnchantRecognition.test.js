@@ -42,6 +42,33 @@ describe("Enchants an imported character is wearing", () => {
     expect(getEnchantByEnchantID(0)).toBeUndefined();
   });
 
+  test("every modelled enchant can be recognised on an import", () => {
+    // A row without an id can never be matched, so a player wearing it reads as unknown forever.
+    enchantDB.forEach((enchant) => {
+      expect(typeof enchant.enchantID).toEqual("number");
+      expect(getEnchantByEnchantID(enchant.enchantID).id).toEqual(enchant.id);
+    });
+  });
+
+  test("weapon enchants a healer wouldn't use are recognised but not offered", () => {
+    // Naming them means someone wearing one is told to swap it, rather than the slot reading as unknown. They
+    // stay out of enchantDB so they're never offered as a choice or entered into a search.
+    const unmodelled = { 7979: "Strength of Halazzi", 7981: "Jan'alai's Precision", 8007: "Worldsoul Cradle",
+                         8009: "Worldsoul Aegis", 8037: "Flames of the Sin'dorei" };
+
+    Object.entries(unmodelled).forEach(([enchantID, name]) => {
+      expect(getEnchantByEnchantID(Number(enchantID)).name).toEqual(name);
+      expect(enchantDB.some((enchant) => enchant.name === name)).toBe(false);
+    });
+  });
+
+  test("an unmodelled enchant carries no stats, so it can't be scored by accident", () => {
+    const recognised = getEnchantByEnchantID(7979);
+
+    expect(recognised.stats).toBeUndefined();
+    expect(recognised.procStats).toBeUndefined();
+  });
+
   test("no two enchants claim the same id", () => {
     const ids = enchantDB.map((enchant) => enchant.enchantID).filter(Boolean);
     expect(new Set(ids).size).toEqual(ids.length);
