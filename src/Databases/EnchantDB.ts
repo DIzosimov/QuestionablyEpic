@@ -17,6 +17,10 @@ export type EnchantEntry = {
   manaPerc?: number;
   specRestriction?: string[]; // only offered / defaulted for these specs
   isDefaultFor?: string[]; // specs this is the automatic pick for
+  // The enchantment id SimC reports as enchant_id. Distinct from both the scroll's item id and the enchant's
+  // spell id. Only rows carrying one can be recognised on an imported character; the rest are simply unknown,
+  // which the report treats as "can't tell" rather than "changed".
+  enchantID?: number;
 };
 
 // Some enchants have no stat of their own - they grant their budget to whichever secondary the spec values most.
@@ -31,8 +35,8 @@ export const enchantDB: EnchantEntry[] = [
   /* ------------------------------------------- Rings ------------------------------------------- */
   // All ring enchants grant the same amount; the only difference is which stat. This is the value for ONE ring -
   // a set wears two and each is applied separately, so a set running the same enchant on both gets twice this.
-  { id: "Silvermoon's Alacrity", name: "Silvermoon's Alacrity", slots: ["Finger"], stats: { haste: 29 } },
-  { id: "Nature's Fury", name: "Nature's Fury", slots: ["Finger"], stats: { crit: 29 } },
+  { id: "Silvermoon's Alacrity", name: "Silvermoon's Alacrity", enchantID: 8025, slots: ["Finger"], stats: { haste: 29 } },
+  { id: "Nature's Fury", name: "Nature's Fury", enchantID: 7997, slots: ["Finger"], stats: { crit: 29 } },
   { id: "Zul'jin's Mastery", name: "Zul'jin's Mastery", slots: ["Finger"], stats: { mastery: 29 } },
   { id: "Silvermoon's Tenacity", name: "Silvermoon's Tenacity", slots: ["Finger"], stats: { versatility: 29 } },
   // Eyes of the Eagle is the name these two specs see. It grants the same budget as the others, applied to their
@@ -41,21 +45,21 @@ export const enchantDB: EnchantEntry[] = [
     specRestriction: ["Holy Priest", "Restoration Shaman"], isDefaultFor: ["Holy Priest", "Restoration Shaman"] },
 
   /* -------------------------------------------- Head ------------------------------------------- */
-  { id: "Empowered Hex of Leeching", name: "Empowered Hex of Leeching", slots: ["Head"], stats: { leech: 55 } },
+  { id: "Empowered Hex of Leeching", name: "Empowered Hex of Leeching", enchantID: 7961, slots: ["Head"], stats: { leech: 55 } },
 
   /* ------------------------------------------- Chest ------------------------------------------- */
   { id: "Mark of the Worldsoul", name: "Mark of the Worldsoul", slots: ["Chest"], stats: { intellect: 50 } },
-  { id: "Mark of the Magister", name: "Mark of the Magister", slots: ["Chest"], stats: { intellect: 40 }, manaPerc: 1.05,
+  { id: "Mark of the Magister", name: "Mark of the Magister", enchantID: 8013, slots: ["Chest"], stats: { intellect: 40 }, manaPerc: 1.05,
     isDefaultFor: ["Restoration Shaman"] },
 
   /* ----------------------------------------- Shoulder ------------------------------------------ */
-  { id: "Silvermoon's Mending", name: "Silvermoon's Mending", slots: ["Shoulder"], stats: { leech: 166 } },
+  { id: "Silvermoon's Mending", name: "Silvermoon's Mending", enchantID: 8031, slots: ["Shoulder"], stats: { leech: 166 } },
 
   /* -------------------------------------------- Legs ------------------------------------------- */
-  { id: "Arcanoweave Spellthread", name: "Arcanoweave Spellthread", slots: ["Legs"], stats: { intellect: 41 }, manaPerc: 1.04 },
+  { id: "Arcanoweave Spellthread", name: "Arcanoweave Spellthread", enchantID: 7937, slots: ["Legs"], stats: { intellect: 41 }, manaPerc: 1.04 },
 
   /* -------------------------------------------- Feet ------------------------------------------- */
-  { id: "Shaladrassil's Roots", name: "Shaladrassil's Roots", slots: ["Feet"], stats: { leech: 28 } },
+  { id: "Shaladrassil's Roots", name: "Shaladrassil's Roots", enchantID: 7993, slots: ["Feet"], stats: { leech: 28 } },
 
   /* ------------------------------------------ Weapon ------------------------------------------- */
   { id: "Acuity of the Ren'dorei", name: "Acuity of the Ren'dorei", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
@@ -68,7 +72,7 @@ export const enchantDB: EnchantEntry[] = [
     procStats: { versatility: 124 } },
   // Grants a random secondary, favouring the highest while above 80% health. Healers sit above that nearly all
   // the time, so it's valued as landing on the best secondary every proc.
-  { id: "Rite of the Hash'ey", name: "Rite of the Hash'ey", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+  { id: "Rite of the Hash'ey", name: "Rite of the Hash'ey", enchantID: 8689, slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
     procStats: { [BEST_SECONDARY]: 139 } },
 ];
 
@@ -95,6 +99,10 @@ export const getDefaultEnchant = (slot: string, spec: string): EnchantEntry | un
 };
 
 export const getEnchantById = (id: string): EnchantEntry | undefined => enchantDB.find((e) => e.id === id);
+
+/** The enchant an imported character is wearing, from SimC's enchant_id. Undefined when we don't know that id. */
+export const getEnchantByEnchantID = (enchantID: number): EnchantEntry | undefined =>
+  enchantID > 0 ? enchantDB.find((e) => e.enchantID === enchantID) : undefined;
 
 /** Slots the player can choose an enchant for, in the order they're shown. */
 export const ENCHANTABLE_SLOTS = ["Head", "Shoulder", "Chest", "Legs", "Feet", ...RING_SLOTS, "CombinedWeapon"];

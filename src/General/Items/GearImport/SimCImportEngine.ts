@@ -730,6 +730,7 @@ export function processItem(line: string, player: Player, contentType: contentTy
     // Add stats to our item based on its item allocations.
     item.stats = calcStatsAtLevel(item.level, protoItem.slot, itemAllocations, protoItem.tertiary);
     item.gemString = gemString !== "" ? gemString.slice(0, -1) : "";
+    if (enchantID > 0) item.enchantID = enchantID;
     if (Object.keys(itemBonusStats).length > 0) item.addStats(itemBonusStats);
 
     // Special effects. Note we handle them here instead of in the items constructor in case the player has added an effect to an item like an Embellishment.

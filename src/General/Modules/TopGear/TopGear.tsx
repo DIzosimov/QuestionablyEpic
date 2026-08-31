@@ -149,6 +149,7 @@ interface ReportItem {
   effect?: any;
   // The gems the item was wearing in game, so the report can mark the ones Top Gear wants changed.
   gemString?: string;
+  enchantID?: number;
 }
 
 declare module '@mui/material/styles' {
@@ -585,6 +586,7 @@ export default function TopGear(props: any) {
         if (item.socket) newItem.socket = item.socket;
         // Kept so the report can tell a gem it's recommending apart from one already socketed.
         if (item.gemString) newItem.gemString = item.gemString;
+        if (item.enchantID) newItem.enchantID = item.enchantID;
         //if (item.socketedGems) newItem.socketedGems = item.socketedGems;
         if (item.vaultItem) newItem.vaultItem = item.vaultItem;
         if (item.exclusiveItem) newItem.exclusiveItem = item.exclusiveItem;

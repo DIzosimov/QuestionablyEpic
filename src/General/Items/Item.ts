@@ -67,6 +67,9 @@ export class Item {
   mainHandUniqueHash?: string;
   offHandUniqueHash?: string;
   gemString?: string;
+  // The enchant the character was wearing in game, as SimC's enchant_id. Lets the report tell an enchant it's
+  // recommending apart from one already applied.
+  enchantID?: number;
   flags: string[] = []; // Flags: reforged, offspecWeapon. 
 
   constructor(id: number, name: string, slot: string, socket: number, tertiary: string, softScore: number = 0, level: number, bonusIDS: string, gameType: gameTypes = "Retail", catalyzedID = 0) {

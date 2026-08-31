@@ -4,6 +4,7 @@ import { Card, CardContent, CardActionArea, Typography, Grid, Divider, Tooltip }
 import { getTranslatedItemName, buildStatStringSlim, getItemIcon, getItemProp, getGemProp, getGemIcon } from "../../Engine/ItemUtilities";
 import { buildPrimGems } from "../../Engine/InterfaceUtilities";
 import { reforgeIDs } from "Databases/ReforgeDB";
+import { getEnchantByEnchantID } from "Databases/EnchantDB";
 import "./MiniItemCard.css";
 import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
@@ -192,13 +193,22 @@ export default function ItemCardReport(props) {
 
   // Rings share a slot name but are enchanted separately, so the report tells each card which entry is its own.
   // Older reports were saved before the split and only have the shared Finger entry, hence the fallback.
+  // The enchant the item came in wearing, from SimC's enchant_id. Only rows carrying that id can be recognised,
+  // so an enchant we don't have the id for reads as "can't tell" and is left unmarked - better to miss a change
+  // than to tell the player to re-enchant something they already have.
+  const equippedEnchant = getEnchantByEnchantID(item.enchantID || 0);
+
   const enchantCheck = (item) => {
     const slot = (props.enchantSlot in enchants) ? props.enchantSlot : item.slot;
     if (!(slot in enchants)) return null;
 
+    const recommended = enchants[slot];
+    const changed = gameType === "Retail" && Boolean(equippedEnchant) && equippedEnchant.name !== recommended;
+
     return (
-      <Typography variant="subtitle2" wrap="nowrap" display="block" align="left" style={{ fontSize: "12px", color: "#36ed21", paddingRight: 4 }}>
-        {enchants[slot]}
+      <Typography variant="subtitle2" wrap="nowrap" display="block" align="left"
+                  style={{ fontSize: "12px", color: changed ? CHANGED_RING : "#36ed21", paddingRight: 4 }}>
+        {recommended}
       </Typography>
     );
   };
