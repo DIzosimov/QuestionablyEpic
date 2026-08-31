@@ -560,6 +560,7 @@ export default function TopGear(props: any) {
                   socketedGems: report.itemSet.gems || [],
                   reforges: report.itemSet.reforges || {},
                   folioGems: report.itemSet.folioGems || [],
+                  folioAuto: report.itemSet.folioAuto || [],
                   firstSocket: report.itemSet.firstSocket,
                   hardScore: report.itemSet.hardScore,
                   setHPS: report.itemSet.setHPS,

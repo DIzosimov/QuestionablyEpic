@@ -80,8 +80,29 @@ export default function ItemCardReport(props) {
   const socketImage = getGemIcon(enchants["Gems"], gameType);
   const tier = item.setID !== "" && item.slot !== "Trinket" ? <div style={{ fontSize: 10, lineHeight: 1, color: "yellow" }}>{t("Tier")}</div> : null;
   const tertiary = "leech" in item && item.leech >= 0 ? <div style={{ fontSize: 10, lineHeight: 1, color: "lime" }}>{t('Leech')}</div> : null;
+  /* ------------------------------- What changed from the equipped gear ------------------------------- */
+  // An item the player wasn't already wearing is a change in itself, so its gems aren't flagged individually -
+  // the card's own ring already says the whole piece is new.
+  const isNewItem = gameType === "Retail" && !item.isEquipped && item.slot !== "CombinedWeapon";
+  // The gems the item was wearing in game, carried through the report by shortenReport.
+  const equippedGems = (item.gemString || "").split(":").map(Number).filter((id) => id > 0);
+  // Consumed as we go so a recommendation only counts as unchanged once per gem already socketed: asking for two
+  // of something the player has one of leaves the second one flagged.
+  const unmatchedGems = [...equippedGems];
+  const isNewGem = (gem) => {
+    if (isNewItem || !item.isEquipped || gameType !== "Retail") return false;
+    const alreadyWorn = unmatchedGems.indexOf(gem);
+    if (alreadyWorn === -1) return true;
+    unmatchedGems.splice(alreadyWorn, 1);
+    return false;
+  };
+
   const isEmbellishment = item.effect && item.effect.type === "embellishment";
-  const embellishmentLabel = isEmbellishment ? <div style={{ fontSize: 10, lineHeight: 1, color: "lightblue" }}>{t('Embellishment')}</div> : null;
+  // Coloured with the change ring when the piece carrying it is one the player isn't wearing, so the
+  // embellishments that actually need crafting stand out from the ones already on.
+  const embellishmentLabel = isEmbellishment
+    ? <div style={{ fontSize: 10, lineHeight: 1, color: isNewItem ? CHANGED_RING : "lightblue" }}>{t('Embellishment')}</div>
+    : null;
   const catalyzedID = item.catalyzedID || null;
   const isCatalyzed = /*Boolean(catalyzedID) ||*/ item.isCatalystItem;
   const catalyst = isCatalyzed ? <div style={{ fontSize: 10, lineHeight: 1, color: "plum" }}>{t("Catalyst")}</div> : null;
@@ -120,23 +141,6 @@ export default function ItemCardReport(props) {
   let isExclusive = item.exclusiveItem;
 
   let socket = [];
-
-  /* ------------------------------- What changed from the equipped gear ------------------------------- */
-  // An item the player wasn't already wearing is a change in itself, so its gems aren't flagged individually -
-  // the card's own ring already says the whole piece is new.
-  const isNewItem = gameType === "Retail" && !item.isEquipped && item.slot !== "CombinedWeapon";
-  // The gems the item was wearing in game, carried through the report by shortenReport.
-  const equippedGems = (item.gemString || "").split(":").map(Number).filter((id) => id > 0);
-  // Consumed as we go so a recommendation only counts as unchanged once per gem already socketed: asking for two
-  // of something the player has one of leaves the second one flagged.
-  const unmatchedGems = [...equippedGems];
-  const isNewGem = (gem) => {
-    if (isNewItem || !item.isEquipped || gameType !== "Retail") return false;
-    const alreadyWorn = unmatchedGems.indexOf(gem);
-    if (alreadyWorn === -1) return true;
-    unmatchedGems.splice(alreadyWorn, 1);
-    return false;
-  };
 
   /*if (item.id === 203460) {
     const gemCombo = props.primGems;

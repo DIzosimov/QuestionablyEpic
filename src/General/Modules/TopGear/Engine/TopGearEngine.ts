@@ -1451,6 +1451,9 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
 
   const folioStats = getFolioEffect(folioGems, {player: player, contentType: contentType, settings: userSettings, setStats: setStats, castModel: castModel, setVariables: setVariables});
   builtSet.folioGems = folioGems;
+  // The runes the player would have had without touching anything. SimC doesn't report the Folio, so this is the
+  // only "before" there is - the report marks the slots that differ from it and leaves the rest unmarked.
+  builtSet.folioAuto = getFolioGems({}, getHighestWeight(castModel));
   effectStats.push(folioStats);
 
   // Special 10.0.7 Ring
