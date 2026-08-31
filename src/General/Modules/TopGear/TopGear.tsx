@@ -25,7 +25,7 @@ import { RootState } from "Redux/Reducers/RootReducer";
 import { Item } from "General/Items/Item";
 import {Player } from "General/Modules/Player/Player";
 import { TopGearResult } from "General/Modules/TopGear/Engine/TopGearResult";
-import { TopGearProgress } from "./Engine/TopGearEngine";
+import { TopGearProgress, estimateEvaluations } from "./Engine/TopGearEngine";
 import TopGearReforgePanel from "./TopGearReforgePanel";
 import { getSetting } from "Retail/Engine/EffectFormulas/EffectUtilities";
 import { prepareTopGear } from "./Engine/TopGearEngineClassic";
@@ -605,9 +605,15 @@ export default function TopGear(props: any) {
       // Gear sets are evaluated independently, so the run splits cleanly across workers. Each builds the same sets
       // and evaluates a disjoint slice of them, and finishTopGear merges their rankings into one report - see the
       // sharding tests for why the merged result is the same one a single thread produces.
-      // One core is left for this thread so drawing the progress bar never competes with a worker for it. Both
-      // stages shard now, so more workers is a real gain rather than more copies of the same build.
-      const shardCount = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
+      // Workers are not free: each one parses the engine bundle and builds every database before it evaluates a
+      // single set, which measured at ~0.6s of pure startup. Spending eight of those on a run that takes two
+      // seconds makes it slower, and it showed up as every run having the same floor no matter how small.
+      // So parallelism is bought only once there's enough work for each worker to earn its own startup back.
+      // One core is left for this thread, so drawing the progress bar never competes with a worker for one.
+      const EVALUATIONS_PER_WORKER = 50000;
+      const maxWorkers = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
+      const estimated = estimateEvaluations(itemList, wepCombos, playerSettings, props.player.spec);
+      const shardCount = Math.max(1, Math.min(maxWorkers, Math.floor(estimated / EVALUATIONS_PER_WORKER)));
       shardProgress.current = [];
 
       Promise.all(Array.from({ length: shardCount }, (_unused, index) =>

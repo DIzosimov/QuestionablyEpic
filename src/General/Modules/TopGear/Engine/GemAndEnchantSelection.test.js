@@ -1,7 +1,7 @@
 import Player from "General/Modules/Player/Player";
 import Item from "General/Items/Item";
 import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
-import { runTopGear, runTopGearShard, finishTopGear, TopSets } from "./TopGearEngine";
+import { runTopGear, runTopGearShard, finishTopGear, TopSets, countGearSets, estimateEvaluations } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
 import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import rootReducer from "Redux/Reducers/RootReducer";
@@ -1253,5 +1253,61 @@ describe("Building gear sets reports a total it actually reaches", () => {
                       if (update.stage === "Evaluating sets") evaluating.push(update);
                     });
     expect(evaluating[evaluating.length - 1].total).toEqual(promised);
+  });
+});
+
+/*
+  Sizing a run before it starts. A worker costs a full engine and database initialisation - measured at ~0.6s -
+  before it evaluates anything, so spending eight of them on a two second run makes it slower. The count only has
+  to be good enough to choose how many workers to spend, but it has to be right about the shape.
+*/
+describe("A run can be sized before it is built", () => {
+  const playerWith = (gear) => {
+    const p = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    gear.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      p.addActiveItem(item);
+    });
+    return p;
+  };
+
+  test("the set count matches the sets actually built", () => {
+    [GEAR, [...GEAR, [268248, "Finger"], [270174, "Trinket"]], [...GEAR, [268229, "Head"]]].forEach((gear) => {
+      const p = playerWith(gear);
+      const wepCombos = buildNewWepCombos(p, true);
+      const counted = countGearSets(p.activeItems, wepCombos);
+      const built = runTopGearShard(p.activeItems, wepCombos, p, "Raid", p.getHPS("Raid"), cfg(),
+                                    p.getActiveModel("Raid")).setsBuilt;
+      expect(counted).toEqual(built);
+    });
+  });
+
+  test("an untouched profile is one evaluation per set", () => {
+    const p = playerWith(GEAR);
+    const wepCombos = buildNewWepCombos(p, true);
+    expect(estimateEvaluations(p.activeItems, wepCombos, cfg(), "Preservation Evoker"))
+      .toEqual(countGearSets(p.activeItems, wepCombos));
+  });
+
+  test("multi-selecting raises the estimate", () => {
+    const p = playerWith(GEAR);
+    const wepCombos = buildNewWepCombos(p, true);
+    const plain = estimateEvaluations(p.activeItems, wepCombos, cfg(), "Preservation Evoker");
+    const wide = estimateEvaluations(p.activeItems, wepCombos, cfg(WIDE_SELECTION), "Preservation Evoker");
+    const everything = estimateEvaluations(p.activeItems, wepCombos, cfg({ optimizeAllGearOptions: true }), "Preservation Evoker");
+
+    expect(wide).toBeGreaterThan(plain);
+    expect(everything).toBeGreaterThan(wide);
+  });
+
+  test("a depth cap holds the estimate down", () => {
+    const p = playerWith(GEAR);
+    const wepCombos = buildNewWepCombos(p, true);
+    const capped = estimateEvaluations(p.activeItems, wepCombos, cfg({ ...WIDE_SELECTION, gearVariantLimit: 24 }), "Preservation Evoker");
+
+    // Whatever the search space, a capped run evaluates each set at most that many times.
+    expect(capped).toEqual(countGearSets(p.activeItems, wepCombos) * 24);
   });
 });

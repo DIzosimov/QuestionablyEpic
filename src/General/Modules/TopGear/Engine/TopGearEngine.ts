@@ -20,7 +20,7 @@ import Item from "General/Items/Item";
 import { gemDB, getCurrentStatGems, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
 import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, RING_SLOTS, enchantSlotSource,
          WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION } from "Databases/EnchantDB";
-import { getFolioEffect, getFolioGems, buildFolioCombinations, getShortName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { getFolioEffect, getFolioGems, buildFolioCombinations, countFolioCombinations, getShortName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
  * == Top Gear Engine ==
@@ -701,6 +701,53 @@ const ringsCanPair = (a: Item, b: Item) =>
   a.id === 215135 || a.id === 240951;
 const trinketsCanPair = (a: Item, b: Item) => a.id !== b.id;
 
+/** The items available in each slot a set draws from. */
+const splitBySlot = (itemList: Item[]) => {
+  const splitItems: { [slot: string]: Item[] } = {};
+  ["Head", "Neck", "Shoulder", "Back", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet", "Finger", "Trinket"]
+    .forEach((slot) => { splitItems[slot] = []; });
+  itemList.forEach((item) => { if (item.slot in splitItems) splitItems[item.slot].push(item); });
+  return splitItems;
+};
+
+/**
+ * How many gear sets a selection produces, without building any of them. Exact: nothing but the ring and trinket
+ * pair rules rejects a combination, so it's the product of the other slots times the valid pairs in those two.
+ */
+export function countGearSets(itemList: Item[], wepCombos: Item[]): number {
+  const splitItems = splitBySlot(itemList);
+  return ["Head", "Shoulder", "Neck", "Back", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet"]
+    .reduce((total, slot) => total * splitItems[slot].length, 1)
+    * wepCombos.length
+    * countPairs(splitItems.Finger, ringsCanPair)
+    * countPairs(splitItems.Trinket, trinketsCanPair);
+}
+
+/**
+ * Roughly how many evaluations a run will make. Used to decide how many workers to spend on it: a worker costs a
+ * full engine and database initialisation before it does any work, which a small run can never earn back.
+ *
+ * Sockets are taken from the best-socketed item in each slot rather than per set, so this is an estimate. It only
+ * picks a worker count - being out by a factor of two changes how fast the run is, never what it returns.
+ */
+export function estimateEvaluations(itemList: Item[], wepCombos: Item[], userSettings: any, spec: string): number {
+  const splitItems = splitBySlot(itemList);
+  const sockets = Object.entries(splitItems).reduce((total, [slot, items]) => {
+    const best = items.map((item) => item.socket || 0).sort((a, b) => b - a);
+    return total + best.slice(0, slot === "Finger" || slot === "Trinket" ? 2 : 1).reduce((sum, n) => sum + n, 0);
+  }, 0);
+
+  const searchedGems = getGemSearchSpace(userSettings);
+  const variants = Math.min(
+    resolveVariantLimit(userSettings),
+    (searchedGems.length > 1 ? countGemLoadouts(searchedGems.length, Math.max(0, sockets - 1)) : 1)
+      * Math.max(1, countEnchantCombinations(getEnchantSearchSpace(userSettings, spec)))
+      * Math.max(1, countFolioCombinations(userSettings))
+      * Math.max(1, countConsumableCombinations(userSettings)));
+
+  return countGearSets(itemList, wepCombos) * Math.max(1, variants);
+}
+
 const countPairs = (items: Item[], canPair: (a: Item, b: Item) => boolean) => {
   let pairs = 0;
   for (let i = 0; i < items.length - 1; i++) {
@@ -756,12 +803,8 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report
   }
   slotLengths.Weapon = wepCombos.length;
 
-  // Every slot but rings and trinkets contributes a plain multiplier, and those two contribute their valid pair
-  // counts, so this is the number of sets the loops below will actually produce - not an estimate.
-  const totalSets = ["Head", "Shoulder", "Neck", "Back", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet", "Weapon"]
-    .reduce((total, slot) => total * slotLengths[slot], 1)
-    * countPairs(splitItems.Finger, ringsCanPair)
-    * countPairs(splitItems.Trinket, trinketsCanPair);
+  // The number of sets the loops below will actually produce - not an estimate.
+  const totalSets = countGearSets(itemList, wepCombos);
   // A shard builds only its own sets. Every shard still walks the whole combination space - that's just index
   // arithmetic - but skips assembling the item list, scoring it and allocating an ItemSet for the sets it doesn't
   // own, which is nearly all of the cost.
