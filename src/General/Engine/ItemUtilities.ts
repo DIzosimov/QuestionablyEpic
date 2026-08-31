@@ -1455,3 +1455,48 @@ export function countChoiceCombinations(choices: SlotChoices): number {
   const counts = Object.values(pinnedSlots(choices)).map((list) => list.length);
   return counts.length === 0 ? 0 : counts.reduce((total, n) => total * n, 1);
 }
+
+
+/* ---------------------------------- Crafted stat combinations ---------------------------------- */
+// A crafted item's two secondaries are chosen when it's made. These are shared by the add-item form and by
+// duplicating an item with a different combination, so the two can't disagree about what a combination means.
+
+/** The stat combinations a crafted item can be made with. Random-stat items can take them in either order. */
+export const CRAFTED_STAT_CHOICES = [
+  "Haste / Versatility", "Haste / Mastery", "Haste / Crit",
+  "Crit / Mastery", "Crit / Versatility", "Mastery / Versatility",
+];
+export const CRAFTED_STAT_CHOICES_RANDOM = [
+  "Haste / Versatility", "Haste / Mastery", "Haste / Crit",
+  "Crit / Versatility", "Crit / Haste", "Crit / Mastery",
+  "Mastery / Haste", "Mastery / Crit", "Mastery / Versatility",
+  "Versatility / Haste", "Versatility / Crit", "Versatility / Mastery",
+];
+export const CRAFTED_STAT_CHOICES_ENGINEERING = [
+  "Haste (engineering)", "Crit (engineering)", "Mastery (engineering)", "Versatility (engineering)",
+];
+
+/** "Haste / Versatility" becomes ["haste", "versatility"]. */
+export const parseMissives = (missives: string): string[] =>
+  missives.toLowerCase().replace(" (engineering)", "").replace(/ /g, "").split("/");
+
+// The allocation ids a random-stat item carries for each secondary.
+const RANDOM_STAT_IDS: { [stat: string]: number } = { haste: 36, crit: 32, versatility: 40, mastery: 49 };
+export const craftedStatIDs = (missiveStats: string[]): number[] =>
+  missiveStats.map((stat) => RANDOM_STAT_IDS[stat]).filter((id) => id !== undefined);
+
+// The bonus ids a missive-crafted item carries, which drive the Wowhead tooltip.
+const MISSIVE_BONUS_IDS: { [stat: string]: string } = { haste: ":6649", mastery: ":6648", crit: ":6647", versatility: ":6650" };
+export const missiveBonusIDs = (missiveStats: string[]): string =>
+  missiveStats.map((stat) => MISSIVE_BONUS_IDS[stat] || "").join("");
+
+/** The combination an item was made with, as it appears in the lists above. Empty when it has none. */
+export const craftedStatLabel = (item: any): string => {
+  const stats = item.missiveStats && item.missiveStats.length > 0
+    ? item.missiveStats
+    : Object.keys(RANDOM_STAT_IDS).filter((stat) => (item.craftedStats || []).includes(RANDOM_STAT_IDS[stat]));
+  if (!stats || stats.length === 0) return "";
+
+  const titled = stats.map((stat: string) => stat.charAt(0).toUpperCase() + stat.slice(1));
+  return titled.join(" / ");
+};

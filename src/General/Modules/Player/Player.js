@@ -2,7 +2,8 @@
 import SPEC from "../../Engine/SPECS";
 import { STATCONVERSION } from "../../Engine/STAT";
 import Item from "../../Items/Item";
-import { scoreItem, getItemDB, getItemAllocations, calcStatsAtLevel } from "../../Engine/ItemUtilities";
+import { scoreItem, getItemDB, getItemAllocations, calcStatsAtLevel, getItemProp,
+         parseMissives, craftedStatIDs, missiveBonusIDs } from "../../Engine/ItemUtilities";
 import { getUnique } from "./PlayerUtilities";
 import CastModel from "./CastModel";
 import { reportError } from "../../SystemTools/ErrorLogging/ErrorReporting";
@@ -335,6 +336,31 @@ export class Player {
 
     if (newItem) this.activeItems = this.activeItems.concat(newItem);
     
+  };
+
+  /**
+   * Adds a copy of a crafted item made with a different stat combination.
+   *
+   * Same shape as embellishItem: the original is left alone and the copy joins the list, so the two can be
+   * compared against each other rather than one replacing the other. Saves rebuilding the item from scratch in
+   * the add form just to try a different pair of secondaries.
+   */
+  recraftItem = (item, missives) => {
+    const newItem = item.clone();
+    newItem.active = true;
+
+    const missiveStats = parseMissives(missives);
+    if (getItemProp(item.id, "randomStats", item.gameType)) {
+      newItem.craftedStats = craftedStatIDs(missiveStats);
+    } else {
+      newItem.missiveStats = missiveStats;
+      newItem.bonusIDS = missiveBonusIDs(missiveStats);
+    }
+    // Recomputes the item's stats from the new allocation, the same call the add form makes.
+    newItem.updateLevel(item.level, missiveStats);
+
+    this.activeItems = this.activeItems.concat(newItem);
+    return newItem;
   };
 
   changeCustomOption = (item, selectedOption) => {

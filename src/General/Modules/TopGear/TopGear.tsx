@@ -299,6 +299,14 @@ export default function TopGear(props: any) {
     setItemList([...player.getActiveItems(activeSlot)]);
   }
 
+  // Adds a copy of a crafted item made with a different pair of secondaries, so both can be compared rather than
+  // rebuilding the item in the add form to try one.
+  const recraftItem = (item: Item, missives: string) => {
+    let player = props.player;
+    player.recraftItem(item, missives);
+    setItemList([...player.getActiveItems(activeSlot)]);
+  }
+
   const setCustomItemOptions = (item: Item, selectedOption: number[]) => {
     let player = props.player;
     player.changeCustomOption(item, selectedOption);
@@ -968,7 +976,7 @@ export default function TopGear(props: any) {
                 <Divider style={{ marginBottom: 10, width: "42%" }} />
                 <Grid container spacing={1}>
                   {[...props.player.getActiveItems(key.slotName)].map((item, index) => (
-                    <MiniItemCard key={index} item={item} itemKey={index} setCustomItemOptions={setCustomItemOptions} embellishItem={embellishItem} upgradeItem={upgradeItem} activateItem={activateItem} delete={deleteItem} catalyze={catalyzeItem} /*primGems={props.player.getBestPrimordialIDs(playerSettings, contentType)}*/ />
+                    <MiniItemCard key={index} item={item} itemKey={index} setCustomItemOptions={setCustomItemOptions} embellishItem={embellishItem} recraftItem={recraftItem} upgradeItem={upgradeItem} activateItem={activateItem} delete={deleteItem} catalyze={catalyzeItem} /*primGems={props.player.getBestPrimordialIDs(playerSettings, contentType)}*/ />
                   ))}
                 </Grid>
               </Grid>

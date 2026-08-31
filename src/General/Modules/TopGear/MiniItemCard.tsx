@@ -180,6 +180,7 @@ interface ItemCardProps {
   upgradeItem: (item: Item, newItemLevel: number, socketFlag: boolean, vaultFlag: boolean) => void;
   embellishItem: (item: Item, embellishmenName: string) => void;
   setCustomItemOptions: (item: Item, selectedOption: number[]) => void;
+  recraftItem?: (item: Item, missives: string) => void;
   activateItem: (unique: string, active: boolean) => void;
   delete: (unique: string) => void;
   catalyze: (item: Item) => void;
@@ -275,6 +276,7 @@ export default function ItemCard(props: ItemCardProps) {
                 item={item}
                 gameType={gameType}
                 setCustomItemOptions={props.setCustomItemOptions}
+                recraftItem={props.recraftItem}
               />
             </Grid>
           </Grid>
