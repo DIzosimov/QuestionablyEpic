@@ -53,9 +53,9 @@ const FOLIO_AUTO_DEFAULTS: { [slot: number]: number } = { 1: 1279599, 2: 1279603
 
 // Slot 4 is the pure secondary stat slot, so Automatic follows the player's best stat.
 const FOLIO_STAT_RUNES: { [stat: string]: number } = {
-  haste: 1287774,
+  haste: 1279610,
   crit: 1279609,
-  mastery: 1287771,
+  mastery: 1279612,
   versatility: 1279613,
 };
 
@@ -306,7 +306,7 @@ export const omniumFolioData: Array<folioGemType> = [
   },
     {
     name: "Rune of Burning Haste",
-    id: 1287774,
+    id: 1279610,
     icon: "spell_fire_burningspeed",
     slot: 4,
     shortName: "Haste",
@@ -332,7 +332,7 @@ export const omniumFolioData: Array<folioGemType> = [
   },
       {
     name: "Rune of Masterful Cunning",
-    id: 1287771,
+    id: 1279612,
     icon: "ability_hunter_fervor",
     slot: 4,
     shortName: "Mastery",

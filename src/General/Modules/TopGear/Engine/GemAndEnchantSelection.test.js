@@ -48,7 +48,7 @@ describe("Automatic reproduces the previous behaviour", () => {
   });
 
   test("Folio runes on Automatic match the runes the engine used to hardcode", () => {
-    expect(getFolioGems({}, "mastery")).toEqual([1279599, 1279603, 1287555, 1287771, 1279614]);
+    expect(getFolioGems({}, "mastery")).toEqual([1279599, 1279603, 1287555, 1279612, 1279614]);
     expect(getFolioGems({}, "crit")).toEqual([1279599, 1279603, 1287555, 1279609, 1279614]);
   });
 
@@ -468,7 +468,7 @@ describe("Search depth is configurable", () => {
   still do, so the single-string form has to keep working.
 */
 describe("Omnium Folio runes can be multi-selected", () => {
-  const CRIT = 1279609, HASTE = 1287774, VERS = 1279613;
+  const CRIT = 1279609, HASTE = 1279610, VERS = 1279613;
   const UNLEASHED_FIRE = 1279599; // Slot 1's automatic pick, which nothing selectable can change any more.
 
   test("an untouched profile is Automatic and expands into nothing", () => {
@@ -542,7 +542,7 @@ describe("Omnium Folio runes can be multi-selected", () => {
     expect(multi.itemsCompared).toEqual(single.itemsCompared * 4);
     expect(multi.itemSet).toBeTruthy();
     // The winner must actually be wearing one of the runes that were offered.
-    expect([CRIT, HASTE, 1287771, VERS]).toContain(multi.itemSet.folioGems[3]);
+    expect([CRIT, HASTE, 1279612, VERS]).toContain(multi.itemSet.folioGems[3]);
   });
 
   test("offering extra runes never produces a worse winner than offering one", () => {
