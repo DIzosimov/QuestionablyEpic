@@ -64,6 +64,8 @@ export const enchantDB: EnchantEntry[] = [
     procStats: { haste: 124 }, isDefaultFor: ["Discipline Priest", "Restoration Druid"] },
   { id: "Arcane Mastery", name: "Arcane Mastery", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
     procStats: { mastery: 124 }, isDefaultFor: ["Preservation Evoker"] },
+  { id: "Worldsoul Tenacity", name: "Worldsoul Tenacity", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
+    procStats: { versatility: 124 } },
   // Grants a random secondary, favouring the highest while above 80% health. Healers sit above that nearly all
   // the time, so it's valued as landing on the best secondary every proc.
   { id: "Rite of the Hash'ey", name: "Rite of the Hash'ey", slots: ["1H Weapon", "2H Weapon", "CombinedWeapon"],
