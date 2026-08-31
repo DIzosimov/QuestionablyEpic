@@ -1191,3 +1191,67 @@ describe("A sharded run matches an unsharded one", () => {
     expect(single.itemsCompared).toEqual(whole.itemsCompared);
   });
 });
+
+/*
+  Build progress. A big selection spends real time building gear sets before a single one is evaluated, and until
+  the engine reported that stage the bar sat still with nothing to show. The count has to be exact - a total the
+  build never reaches leaves the bar stuck short forever.
+*/
+describe("Building gear sets reports a total it actually reaches", () => {
+  const withGear = (extraGear = []) => {
+    const p = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    [...GEAR, ...extraGear].forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      p.addActiveItem(item);
+    });
+    return p;
+  };
+
+  const buildStage = (player) => {
+    const seen = [];
+    runTopGearShard(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
+                    cfg(), player.getActiveModel("Raid"), true, (update) => seen.push({ ...update }));
+    return seen.filter((update) => update.stage === "Building gear sets" && update.total > 0);
+  };
+
+  test("the promised total is the number of sets that get built", () => {
+    const player = withGear();
+    const building = buildStage(player);
+    expect(building.length).toBeGreaterThan(0);
+
+    // Every set built is evaluated once per variant, and an untouched profile has exactly one variant, so the
+    // evaluation total is the set count the build stage promised.
+    const evaluating = [];
+    runTopGearShard(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
+                    cfg(), player.getActiveModel("Raid"), true, (update) => {
+                      if (update.stage === "Evaluating sets") evaluating.push(update);
+                    });
+    expect(evaluating[evaluating.length - 1].total).toEqual(building[0].total);
+  });
+
+  test("more gear means more sets to build", () => {
+    const few = buildStage(withGear())[0].total;
+    const more = buildStage(withGear([[268229, "Head"], [268224, "Chest"]]))[0].total;
+
+    expect(more).toBeGreaterThan(few);
+  });
+
+  test("the count reaches the total rather than stopping short", () => {
+    // Extra rings and trinkets are the case that used to be hard to count: those slots take unordered pairs, and
+    // matching ids are skipped, so a plain product would promise more sets than the loops ever build.
+    const player = withGear([[268248, "Finger"], [270174, "Trinket"]]);
+    const building = buildStage(player);
+    const promised = building[0].total;
+
+    expect(building[building.length - 1].done).toBeLessThanOrEqual(promised);
+    // The evaluation stage counts the sets that were actually built, so this pins the promise against reality.
+    const evaluating = [];
+    runTopGearShard(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
+                    cfg(), player.getActiveModel("Raid"), true, (update) => {
+                      if (update.stage === "Evaluating sets") evaluating.push(update);
+                    });
+    expect(evaluating[evaluating.length - 1].total).toEqual(promised);
+  });
+});

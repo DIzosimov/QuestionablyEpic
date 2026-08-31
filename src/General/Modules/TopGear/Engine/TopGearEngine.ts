@@ -513,7 +513,7 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   // == Create Valid Item Sets ==
   // This just builds a set and adds it to our array so that we can score it later.
   // A valid set is just any combination of items that is wearable in-game. Item limits like on legendaries, unique items and so on are all adhered to.
-  let itemSets = createSets(itemList, wepCombos, player.spec);
+  let itemSets = createSets(itemList, wepCombos, player.spec, report);
   // Retaining every evaluation is what used to make a large run die rather than finish: each scored set holds about
   // 2kb, so a few million of them exhaust the worker heap long before the run ends. Only the top slice is ever read.
   const rankedSets = new TopSets(softSlice);
@@ -693,7 +693,23 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
  * @param {*} rawWepCombos Weapon combos are just a list of all possible weapon combinations (so staves are listed alone, and 1H + OHs are paired).
  * @returns
  */
-function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
+// Rings and trinkets are worn two at a time, so those slots enumerate unordered pairs rather than a full product.
+// The set count reported to the player and the loops that build the sets both go through these, so the bar can't
+// promise a total the build never reaches.
+const ringsCanPair = (a: Item, b: Item) =>
+  a.id !== b.id || a.id === 215130 || b.id === 215130 || a.id === 215137 || b.id === 215137 ||
+  a.id === 215135 || a.id === 240951;
+const trinketsCanPair = (a: Item, b: Item) => a.id !== b.id;
+
+const countPairs = (items: Item[], canPair: (a: Item, b: Item) => boolean) => {
+  let pairs = 0;
+  for (let i = 0; i < items.length - 1; i++) {
+    for (let j = i + 1; j < items.length; j++) if (canPair(items[i], items[j])) pairs++;
+  }
+  return pairs;
+};
+
+function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report: TopGearProgressCallback = () => {}) {
   const wepCombos = deepCopyFunction(rawWepCombos);
  
   let setCount = 0;
@@ -738,6 +754,17 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
     }
   }
   slotLengths.Weapon = wepCombos.length;
+
+  // Every slot but rings and trinkets contributes a plain multiplier, and those two contribute their valid pair
+  // counts, so this is the number of sets the loops below will actually produce - not an estimate.
+  const totalSets = ["Head", "Shoulder", "Neck", "Back", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet", "Weapon"]
+    .reduce((total, slot) => total * slotLengths[slot], 1)
+    * countPairs(splitItems.Finger, ringsCanPair)
+    * countPairs(splitItems.Trinket, trinketsCanPair);
+  // Report about a hundred times over the build, matching the evaluation stage.
+  const reportEvery = Math.max(1, Math.floor(totalSets / 100));
+  report({ stage: "Building gear sets", done: 0, total: totalSets });
+
   for (var head = 0; head < slotLengths.Head; head++) {
     let softScore = { head: splitItems.Head[head].softScore,
                       shoulder: 0,
@@ -793,11 +820,7 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
                             softScore.finger2 = splitItems.Finger[finger2].softScore;
 
                             // Auto-delete sets that have matching ring IDs, unless one of the IDs is Shadowghast Ring in which case we'll allow it.
-                            if (finger < finger2 && 
-                                ((splitItems.Finger[finger].id !== splitItems.Finger[finger2].id) ||
-                                (splitItems.Finger[finger].id === 215130 || splitItems.Finger[finger2].id === 215130) ||
-                                (splitItems.Finger[finger].id === 215137 || splitItems.Finger[finger2].id === 215137) ||
-                                splitItems.Finger[finger].id === 215135 || splitItems.Finger[finger].id === 240951)) {
+                            if (finger < finger2 && ringsCanPair(splitItems.Finger[finger], splitItems.Finger[finger2])) {
 
                               for (var trinket = 0; trinket < slotLengths.Trinket - 1; trinket++) {
                                 softScore.trinket = splitItems.Trinket[trinket].softScore;
@@ -805,7 +828,7 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
                                 for (var trinket2 = 1; trinket2 < slotLengths.Trinket; trinket2++) {
                                   softScore.trinket2 = splitItems.Trinket[trinket2].softScore;
 
-                                  if (splitItems.Trinket[trinket].id !== splitItems.Trinket[trinket2].id && trinket < trinket2) {
+                                  if (trinket < trinket2 && trinketsCanPair(splitItems.Trinket[trinket], splitItems.Trinket[trinket2])) {
                                     let includedItems = [
                                       splitItems.Head[head],
                                       splitItems.Neck[neck],
@@ -828,6 +851,7 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
                                     let sumSoft = sumScore(softScore);
                                     itemSets.push(new ItemSet(setCount, includedItems, sumSoft, spec));
                                     setCount++;
+                                    if (setCount % reportEvery === 0) report({ stage: "Building gear sets", done: setCount, total: totalSets });
                                   }
                                 }
                               }
@@ -845,6 +869,10 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
       }
     }
   }
+
+  // The throttled reports above land on multiples of reportEvery, so the last one stops short of the total. Say so
+  // explicitly rather than leaving the stage sitting at 99% while it hands over.
+  report({ stage: "Building gear sets", done: setCount, total: totalSets });
 
   return itemSets;
 }

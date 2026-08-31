@@ -58,6 +58,9 @@ type ShortReport = {
   }
 }
 
+// The stages a run moves through, in order. Used to work out which shards are far enough along to be summed.
+const STAGE_ORDER = ["Building gear sets", "Evaluating sets", "Ranking results"];
+
 interface ReportItem {
   id: number;
   level: number;
@@ -188,8 +191,11 @@ export default function TopGear(props: any) {
   const [btnActive, setBtnActive] = useState<boolean>(true);
   // Where the running engine has got to. Null whenever a run isn't in flight, which is what hides the bar.
   const [progress, setProgress] = useState<TopGearProgress | null>(null);
-  const runStartedAt = React.useRef(0);
+  const runStartedAt = React.useRef(0); // When the whole run began. The estimate uses the per-stage clock below.
   const lastProgressAt = React.useRef(0);
+  // The stage the bar is currently showing, and when it started, so the estimate is per stage rather than per run.
+  const currentStage = React.useRef("");
+  const stageStartedAt = React.useRef(0);
 
   /**
    * Takes a progress report from the engine, at most ten times a second.
@@ -204,22 +210,33 @@ export default function TopGear(props: any) {
     const now = performance.now();
     if (!finished && now - lastProgressAt.current < 100) return;
 
+    // Each stage counts something different, so the estimate restarts with it. Carrying the run's elapsed time
+    // into a stage that has only just begun reads as hours remaining for the first few updates.
+    if (update.stage !== currentStage.current) {
+      currentStage.current = update.stage;
+      stageStartedAt.current = now;
+    }
+
     lastProgressAt.current = now;
     setProgress(update);
   };
 
-  // Each shard only knows about its own slice, so the bar adds them up. A shard that hasn't reported yet counts
-  // as nothing rather than being left out of the total, which would make the bar jump backwards as it starts.
+  // Each shard only knows about its own slice, so the bar adds them up. Shards count different things in different
+  // stages, so only those in the same stage are summed - the run is as far along as its slowest worker, and mixing
+  // a shard's set count into another's evaluation count would make the total meaningless.
   const shardProgress = React.useRef<TopGearProgress[]>([]);
   const receiveShardProgress = (index: number) => (update: TopGearProgress) => {
     shardProgress.current[index] = update;
     const reported = shardProgress.current.filter(Boolean);
     if (reported.length === 0) return;
 
+    const slowest = Math.min(...reported.map((one) => Math.max(0, STAGE_ORDER.indexOf(one.stage))));
+    const inStage = reported.filter((one) => one.stage === STAGE_ORDER[slowest]);
+
     receiveProgress({
-      stage: reported[reported.length - 1].stage,
-      done: reported.reduce((total, one) => total + one.done, 0),
-      total: reported.reduce((total, one) => total + one.total, 0),
+      stage: STAGE_ORDER[slowest],
+      done: inStage.reduce((total, one) => total + one.done, 0),
+      total: inStage.reduce((total, one) => total + one.total, 0),
     });
   };
   
@@ -769,6 +786,9 @@ export default function TopGear(props: any) {
       setProgress(null);
       runStartedAt.current = performance.now();
       lastProgressAt.current = 0;
+      // A fresh run starts in no stage, so the first report of each stage sets its own clock.
+      currentStage.current = "";
+      stageStartedAt.current = performance.now();
       // Special Error Code
       try {
         unleashWorker();
@@ -798,11 +818,11 @@ export default function TopGear(props: any) {
   const renderProgress = () => {
     if (!progress) return null;
     const { stage, done, total } = progress;
-    // Set building reports no total, so the bar runs indeterminate until evaluations start.
+    // Both stages report a real total; only the moment before the set count is known runs indeterminate.
     const measured = total > 0;
     const percent = measured ? Math.min(100, (done / total) * 100) : 0;
 
-    const elapsed = performance.now() - runStartedAt.current;
+    const elapsed = performance.now() - stageStartedAt.current;
     // Wait for a second of real work before estimating - before that the rate is mostly startup noise.
     const remaining = measured && done > 0 && elapsed > 1000 ? (elapsed / done) * (total - done) : 0;
 
