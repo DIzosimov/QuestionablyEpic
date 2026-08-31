@@ -170,7 +170,8 @@ function getMidnightGemOptions(spec: string, contentType: contentTypes, settings
  *   - true  : every socket gets the pinned (or automatic) gem, as before.
  *   - false : sockets that already hold a gem keep it, and only empty ones are filled.
  */
-function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes, userSettings: any, gemLoadout?: number[]): number[] {
+function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes, userSettings: any, gemLoadout?: number[],
+                        keepEquippedGems: boolean = false): number[] {
   const sockets = Math.max(0, builtSet.setSockets);
   if (sockets === 0) return [];
 
@@ -193,7 +194,9 @@ function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes
     return gems;
   };
 
-  if (getGearOption(userSettings, "replaceExistingGems", true) !== false) return buildAutomatic();
+  // keepEquippedGems is how the equipped set asks for its own gems regardless of the setting - it's measuring what
+  // the player is actually wearing, not what they'd have after re-gemming.
+  if (!keepEquippedGems && getGearOption(userSettings, "replaceExistingGems", true) !== false) return buildAutomatic();
 
   // Fill-empty mode: keep what's already socketed, top up the rest. Equipped gems come from the SimC import,
   // which stores them on the item as a colon separated gemString.
@@ -530,7 +533,11 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   try {
     const equippedItems = itemList.filter((item: Item) => item.isEquipped);
     if (equippedItems.length > 0) {
-      const equippedSet = evalSet(new ItemSet(-1, equippedItems, 0, player.spec), newPlayer, contentType, baseHPS, userSettings, newCastModel, false, 0);
+      // Evaluated wearing the player's own gems rather than the ones Top Gear would socket. The upgrade figure is
+      // meant to answer "how much better is this than what I have on", and re-gemming the baseline made a run that
+      // changed no gear at all still report an upgrade - the gain was the engine re-gemming both sides differently.
+      const equippedSet = evalSet(new ItemSet(-1, equippedItems, 0, player.spec), newPlayer, contentType, baseHPS,
+                                  userSettings, newCastModel, false, 0, undefined, undefined, undefined, undefined, true);
       equippedHPS = equippedSet.setHPS || 0;
     }
   } catch (err) {
@@ -1236,7 +1243,7 @@ export function getTopGearGems(gemID: number, gemCount: number, bonus_stats: Sta
  * @param {*} castModel
  * @returns 
  */
-function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any, folioOverride?: any, consumableOverride?: any) {
+function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any, folioOverride?: any, consumableOverride?: any, keepEquippedGems: boolean = false) {
   // == Setup ==
     const statBreakdown = {
     gear: {},
@@ -1370,7 +1377,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
     
   }
   else {
-    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings, gemLoadout);
+    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings, gemLoadout, keepEquippedGems);
     const gemStats = getGemStats(enchants["Gems"]);
     statBreakdown.gems = gemStats;
 

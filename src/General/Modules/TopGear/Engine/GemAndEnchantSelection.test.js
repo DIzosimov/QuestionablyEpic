@@ -1361,3 +1361,65 @@ describe("Enchants that grant your best secondary", () => {
     expect(eagle.stats).toEqual({ [BEST_SECONDARY]: 29 });
   });
 });
+
+/*
+  The equipped comparison. The report shows how much of an upgrade the best set is over what the player has on, so
+  the baseline has to be their gear as it actually is - their own gems included. Evaluating it with the gems Top
+  Gear would socket instead meant a run that changed no gear still reported an upgrade, because the engine had
+  re-gemmed the baseline too.
+*/
+describe("The equipped set is measured wearing the player's own gems", () => {
+  const SOCKETED = "240890:240890:240890"; // Deadly Peridot: haste major, crit minor.
+
+  const withGems = (gems) => {
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    GEAR.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      if (gems && item.socket) item.gemString = gems;
+      player.addActiveItem(item);
+    });
+    return player;
+  };
+
+  const equippedHPS = (player, settings) =>
+    runTopGear(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
+               settings, player.getActiveModel("Raid")).equippedHPS;
+
+  test("what the player wears changes the baseline", () => {
+    // If the baseline ignored socketed gems these two would be identical, which is the bug.
+    const withOut = equippedHPS(withGems(null), cfg());
+    const withSome = equippedHPS(withGems(SOCKETED), cfg());
+
+    expect(withOut).toBeGreaterThan(0);
+    expect(withSome).not.toEqual(withOut);
+  });
+
+  test("the setting to re-gem doesn't move the baseline", () => {
+    // replaceExistingGems is about the sets being searched. The baseline is what the player has on either way.
+    const player = () => withGems(SOCKETED);
+    const replacing = equippedHPS(player(), cfg({ replaceExistingGems: true }));
+    const keeping = equippedHPS(player(), cfg({ replaceExistingGems: false }));
+
+    expect(replacing).toEqual(keeping);
+  });
+
+  test("an unrecognised socketed gem falls back rather than dropping the socket", () => {
+    const nonsense = equippedHPS(withGems("999999:999999:999999"), cfg());
+
+    expect(nonsense).toBeGreaterThan(0);
+  });
+
+  test("nothing equipped means no baseline to report", () => {
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    GEAR.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = false;
+      player.addActiveItem(item);
+    });
+
+    expect(equippedHPS(player, cfg())).toEqual(0);
+  });
+});
