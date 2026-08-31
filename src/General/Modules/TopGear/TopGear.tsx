@@ -69,6 +69,8 @@ interface ReportItem {
   exclusiveItem?: boolean;
   quality?: number;
   effect?: any;
+  // The gems the item was wearing in game, so the report can mark the ones Top Gear wants changed.
+  gemString?: string;
 }
 
 declare module '@mui/material/styles' {
@@ -204,6 +206,21 @@ export default function TopGear(props: any) {
 
     lastProgressAt.current = now;
     setProgress(update);
+  };
+
+  // Each shard only knows about its own slice, so the bar adds them up. A shard that hasn't reported yet counts
+  // as nothing rather than being left out of the total, which would make the bar jump backwards as it starts.
+  const shardProgress = React.useRef<TopGearProgress[]>([]);
+  const receiveShardProgress = (index: number) => (update: TopGearProgress) => {
+    shardProgress.current[index] = update;
+    const reported = shardProgress.current.filter(Boolean);
+    if (reported.length === 0) return;
+
+    receiveProgress({
+      stage: reported[reported.length - 1].stage,
+      done: reported.reduce((total, one) => total + one.done, 0),
+      total: reported.reduce((total, one) => total + one.total, 0),
+    });
   };
   
   const [errorMessage, setErrorMessage] = useState("");
@@ -499,6 +516,8 @@ export default function TopGear(props: any) {
         let newItem: ReportItem = {id: item.id, level: item.level, isEquipped: item.isEquipped, stats: item.stats};
         if ('leech' in item.stats && item.stats.leech > 0) newItem.leech = item.stats.leech;
         if (item.socket) newItem.socket = item.socket;
+        // Kept so the report can tell a gem it's recommending apart from one already socketed.
+        if (item.gemString) newItem.gemString = item.gemString;
         //if (item.socketedGems) newItem.socketedGems = item.socketedGems;
         if (item.vaultItem) newItem.vaultItem = item.vaultItem;
         if (item.exclusiveItem) newItem.exclusiveItem = item.exclusiveItem;
@@ -566,15 +585,29 @@ export default function TopGear(props: any) {
     if (gameType === "Retail") {
       //console.log(instance);
 
-      runWorker("Retail", {
-        itemList,
-        wepCombos,
-        strippedPlayer,
-        contentType,
-        baseHPS,
-        playerSettings,
-        strippedCastModel,
-      }, receiveProgress)
+      // Gear sets are evaluated independently, so the run splits cleanly across workers. Each builds the same sets
+      // and evaluates a disjoint slice of them, and finishTopGear merges their rankings into one report - see the
+      // sharding tests for why the merged result is the same one a single thread produces.
+      const shardCount = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 4));
+      shardProgress.current = [];
+
+      Promise.all(Array.from({ length: shardCount }, (_unused, index) =>
+        runWorker("Retail", {
+          itemList,
+          wepCombos,
+          strippedPlayer,
+          contentType,
+          baseHPS,
+          playerSettings,
+          strippedCastModel,
+          shard: { index, count: shardCount },
+        }, receiveShardProgress(index))))
+        // Imported lazily: a static import would pull the whole engine into the main bundle, when it already
+        // travels as the chunk the workers load.
+        .then(async (shards: any[]) => {
+          const { finishTopGear } = await import("./Engine/TopGearEngine");
+          return finishTopGear(shards, props.player, contentType, props.player.getActiveModel(contentType));
+        })
         .then((result: TopGearResult | null) => { // 
           if (result) {
             // If top gear completes successfully, log a successful run, terminate the worker and then press on to the Report.

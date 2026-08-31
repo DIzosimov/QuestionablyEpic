@@ -476,6 +476,12 @@ function displayReport(
                   </Grid>
 
                   <Grid item xs={12}>
+                    {/* The cards mark what to change; without a key a gold ring is just a mystery. */}
+                    {gameType === "Retail" ? (
+                      <Typography variant="caption" style={{ color: "#f0c674", display: "block", margin: "0 0 6px 4px" }}>
+                        {"Outlined in gold: items you aren't currently wearing, and gems that aren't currently socketed."}
+                      </Typography>
+                    ) : null}
                     <Grid
                       container
                       direction={{ xs: "column", md: "row" }}

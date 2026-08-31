@@ -13,6 +13,9 @@ type GemEntry = {
 // lookup can't drift out of step with the data it's searching.
 export const GEM_MAJOR_STAT = 16;
 export const GEM_MINOR_STAT = 7;
+// The single-stat gems put the lot into one stat. Worth more than a hybrid's major stat, so they win outright
+// whenever one stat is far enough ahead of the others to be worth giving up the split for.
+export const GEM_SOLO_STAT = 17;
 
 // Current-expansion gems. Metas are kept apart from the stat gems because they aren't interchangeable with them:
 // a set has exactly one meta socket, and it's the only socket a meta can go in.
@@ -123,6 +126,34 @@ export const gemDB: GemEntry[] = [
       name: "Flawless Deadly Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_green",
       stats: { haste: GEM_MAJOR_STAT, crit: GEM_MINOR_STAT },
+    },
+    {
+      id: 240896,
+      element: "Peridot",
+      name: "Flawless Quick Peridot",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_green",
+      stats: { haste: GEM_SOLO_STAT },
+    },
+    {
+      id: 240904,
+      element: "Amethyst",
+      name: "Flawless Masterful Amethyst",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_purple",
+      stats: { mastery: GEM_SOLO_STAT },
+    },
+    {
+      id: 240912,
+      element: "Garnet",
+      name: "Flawless Deadly Garnet",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_red",
+      stats: { crit: GEM_SOLO_STAT },
+    },
+    {
+      id: 240920,
+      element: "Lapis",
+      name: "Flawless Versatile Lapis",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_holy_blue",
+      stats: { versatility: GEM_SOLO_STAT },
     },
     {
       id: 213488,

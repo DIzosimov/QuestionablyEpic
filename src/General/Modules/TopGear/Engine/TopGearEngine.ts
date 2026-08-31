@@ -458,6 +458,16 @@ function getGemOptions(spec: string, contentType: contentTypes) {
  * is only known once the sets are built, so it's 0 during the first stage.
  */
 export type TopGearProgress = { stage: string; done: number; total: number };
+// Which slice of the gear sets a worker is responsible for. One shard of one is the whole run.
+export type TopGearShard = { index: number; count: number };
+const WHOLE_RUN: TopGearShard = { index: 0, count: 1 };
+// What a worker hands back: its own best sets, plus the run-wide figures the report needs.
+export type TopGearShardResult = {
+  rankedSets: any[];
+  setsBuilt: number;
+  embellishedSelected: number;
+  equippedHPS: number;
+};
 export type TopGearProgressCallback = (progress: TopGearProgress) => void;
 
 /**
@@ -474,9 +484,13 @@ export type TopGearProgressCallback = (progress: TopGearProgress) => void;
  *                   Finder don't pass one, and the run behaves identically without it.
  * @returns A Top Gear result which includes the best set, and how close various alternatives are.
  */
-export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Player, contentType: contentTypes, 
+/**
+ * One worker's share of a run. Every shard builds the same gear sets and evaluates a disjoint slice of them, so
+ * the shards together cover the run exactly once. Merge the results with finishTopGear.
+ */
+export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: Player, contentType: contentTypes,
                             baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true,
-                            onProgress?: TopGearProgressCallback) {
+                            onProgress?: TopGearProgressCallback, shard: TopGearShard = WHOLE_RUN): TopGearShardResult {
   const report = onProgress || (() => {});
   report({ stage: "Building gear sets", done: 0, total: 0 });
   //console.log("Running Top Gear")
@@ -570,7 +584,11 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
 
   // Evaluations, not sets: with variants a single set is scored once per configuration, and that multiplier is
   // exactly what makes a run long enough to need a progress bar in the first place.
-  const totalEvaluations = itemSets.length * variants.length;
+  // Sets are dealt out round robin rather than in blocks: neighbouring sets are near-identical in build order, so
+  // a block split hands one worker all the good sets and leaves another with nothing worth keeping. Round robin
+  // gives every shard the same spread of quality, which matters because each keeps only its own top slice.
+  const myItemSets = shard.count > 1 ? itemSets.filter((set: ItemSet, index: number) => index % shard.count === shard.index) : itemSets;
+  const totalEvaluations = myItemSets.length * variants.length;
   // Report ~100 times over the run, so the bar moves smoothly without the postMessage traffic becoming the cost.
   const reportEvery = Math.max(1, Math.floor(totalEvaluations / 100));
   let evaluated = 0;
@@ -579,10 +597,10 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // next boundary rather than landing exactly on a multiple of it.
   let nextReport = reportEvery;
 
-  for (var i = 0; i < itemSets.length; i++) {
+  for (var i = 0; i < myItemSets.length; i++) {
     for (var v = 0; v < variants.length; v++) {
       const variant = variants[v];
-      const scoredSet = evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
+      const scoredSet = evalSet(myItemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
                                 variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined,
                                 variant.consumableOverride || undefined);
 
@@ -603,12 +621,26 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
 
   report({ stage: "Ranking results", done: totalEvaluations, total: totalEvaluations });
 
+  return { rankedSets: rankedSets.toArray(), setsBuilt: myItemSets.length, embellishedSelected, equippedHPS };
+}
 
-  // == Sort and Prune sets ==
-  // Only the best few thousand sets are ever read, so the ranking is collected as the run goes rather than sorted
-  // at the end. See TopSets for why that picks the same sets the old sort-everything-then-slice did.
-  const resultSets = rankedSets.toArray();
-  
+/**
+ * Merges the shards of a run into the report.
+ *
+ * Each shard already holds the best `softSlice` of its own slice, so re-ranking their union and taking the same
+ * slice gives the same sets a single unsharded run would have kept: a set only misses the cut if softSlice better
+ * ones exist, and every one of those is in some shard's own top slice too.
+ */
+export function finishTopGear(shards: TopGearShardResult[], player: Player, contentType: contentTypes,
+                              castModel: any): TopGearResult | null {
+  const newPlayer = setupPlayer(player, contentType, castModel);
+  const merged = new TopSets(softSlice);
+  shards.forEach((shard) => shard.rankedSets.forEach((set: any) => merged.add(set)));
+  const resultSets = merged.toArray();
+
+  const setsBuilt = shards.reduce((total, shard) => total + shard.setsBuilt, 0);
+  const embellishedSelected = shards.length > 0 ? shards[0].embellishedSelected : 0;
+
   // == Build Differentials (sets similar in strength) ==
   // A differential is a set that wasn't our best but was close. We'll display these beneath our top gear so that a player could choose a higher stamina option, or a trinket they prefer
   // and so on if they are already close in strength.
@@ -618,7 +650,7 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // and nothing beside it tells the player nothing. Sets with fewer sockets than the largest one can be gemmed
   // identically by more than one loadout, so a few of these reach here even with the expansion behaving.
   for (var k = 1; k < resultSets.length && differentials.length < CONSTRAINTS.Shared.topGearDifferentials; k++) {
-    const differential = buildDifferential(resultSets[k], primeSet, newPlayer, contentType, newCastModel.modelType[contentType] || "Default");
+    const differential = buildDifferential(resultSets[k], primeSet, newPlayer, contentType, castModel.modelType[contentType] || "Default");
     const swaps = differential.items.length + differential.gems.length + differential.enchants.length + differential.runes.length;
     if (swaps > 0) differentials.push(differential);
   }
@@ -630,18 +662,28 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
     // Every set we built was thrown out. By far the most common cause is the embellishment cap: a player who already
     // wears two embellishments and then adds a third embellished item has no wearable combination left, and used to
     // just get an empty report with no explanation.
-    reportError(newPlayer, "Top Gear", "No valid sets after verification. Sets built: " + itemSets.length +
+    reportError(newPlayer, "Top Gear", "No valid sets after verification. Sets built: " + setsBuilt +
                 ", embellished items selected: " + embellishedSelected, contentType);
     return null;
   } else {
     let result: TopGearResult = new TopGearResult(resultSets[0], differentials, contentType);
     result.itemsCompared = resultSets.length;
     result.embellishedSelected = embellishedSelected;
-    result.equippedHPS = equippedHPS;
+    result.equippedHPS = shards.length > 0 ? shards[0].equippedHPS : 0;
     result.new = true;
     result.id = generateReportCode();
     return result;
   }
+}
+
+/**
+ * A whole run on one thread. The sharded path calls runTopGearShard directly, once per worker, and merges.
+ */
+export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Player, contentType: contentTypes,
+                           baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true,
+                           onProgress?: TopGearProgressCallback): TopGearResult | null {
+  const shard = runTopGearShard(rawItemList, wepCombos, player, contentType, baseHPS, userSettings, castModel, reporting, onProgress);
+  return finishTopGear([shard], player, contentType, castModel);
 }
 
 /**

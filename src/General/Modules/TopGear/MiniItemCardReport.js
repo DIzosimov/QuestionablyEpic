@@ -13,6 +13,12 @@ import { getTitanDiscName } from "Retail/Engine/EffectFormulas/Generic/PatchEffe
 import CatalyzedFromIndicator from "General/Modules/GeneralComponents/CatalyzedFromIndicator";
 
 
+// What Top Gear wants you to change gets a gold ring. It's an outline rather than a border so it sits on top of
+// the vault / exclusive / catalyst styles below, which already own the border and would otherwise hide it.
+const CHANGED_RING = "#f0c674";
+const changedItemStyle = { outline: `2px solid ${CHANGED_RING}`, outlineOffset: "-1px" };
+const changedGemStyle = { outline: `1px solid ${CHANGED_RING}`, outlineOffset: "1px", borderRadius: 2 };
+
 const useStyles = makeStyles({
   root: {
     minWidth: 210,
@@ -115,6 +121,23 @@ export default function ItemCardReport(props) {
 
   let socket = [];
 
+  /* ------------------------------- What changed from the equipped gear ------------------------------- */
+  // An item the player wasn't already wearing is a change in itself, so its gems aren't flagged individually -
+  // the card's own ring already says the whole piece is new.
+  const isNewItem = gameType === "Retail" && !item.isEquipped && item.slot !== "CombinedWeapon";
+  // The gems the item was wearing in game, carried through the report by shortenReport.
+  const equippedGems = (item.gemString || "").split(":").map(Number).filter((id) => id > 0);
+  // Consumed as we go so a recommendation only counts as unchanged once per gem already socketed: asking for two
+  // of something the player has one of leaves the second one flagged.
+  const unmatchedGems = [...equippedGems];
+  const isNewGem = (gem) => {
+    if (isNewItem || !item.isEquipped || gameType !== "Retail") return false;
+    const alreadyWorn = unmatchedGems.indexOf(gem);
+    if (alreadyWorn === -1) return true;
+    unmatchedGems.splice(alreadyWorn, 1);
+    return false;
+  };
+
   /*if (item.id === 203460) {
     const gemCombo = props.primGems;
     const gemData = buildPrimGems(gemCombo);
@@ -153,10 +176,12 @@ export default function ItemCardReport(props) {
   }*/
   else if (item.socketedGems) {
     item.socketedGems.forEach(gem => {
+      const changed = isNewGem(gem);
       socket.push(
       <div style={{ display: "inline", marginRight: "5px" }}>
-        <Tooltip title={capitalizeFirstLetter(getGemProp(gem, "name"))} arrow>
-          <img src={getGemIcon(gem, gameType)} width={15} height={15} style={{ verticalAlign: "middle" }} alt="Socket" />
+        <Tooltip title={capitalizeFirstLetter(getGemProp(gem, "name")) + (changed ? " - not currently socketed" : "")} arrow>
+          <img src={getGemIcon(gem, gameType)} width={15} height={15}
+               style={{ verticalAlign: "middle", ...(changed ? changedGemStyle : {}) }} alt="Socket" />
         </Tooltip>
     </div>);
     })
@@ -196,7 +221,7 @@ export default function ItemCardReport(props) {
       <Card
         className={isExclusive? classes.exclusive : isVault ? classes.vault : (!item.isEquipped && gameType === "Retail" && item.slot != "CombinedWeapon") ? classes.notequipped : catalyst ? classes.catalyst : classes.root}
         elevation={0}
-        style={{ backgroundColor: "rgba(34, 34, 34, 0.26)" }}
+        style={{ backgroundColor: "rgba(34, 34, 34, 0.26)", ...(isNewItem ? changedItemStyle : {}) }}
       >
         <CardActionArea disabled={false}>
           <Grid container display="inline-flex" wrap="nowrap" justifyContent="space-between">

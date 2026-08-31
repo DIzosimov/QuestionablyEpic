@@ -1,7 +1,7 @@
 import Player from "General/Modules/Player/Player";
 import Item from "General/Items/Item";
 import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
-import { runTopGear, TopSets } from "./TopGearEngine";
+import { runTopGear, runTopGearShard, finishTopGear, TopSets } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
 import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import rootReducer from "Redux/Reducers/RootReducer";
@@ -728,6 +728,7 @@ describe("A run reports its progress", () => {
 const { GEM_MAJOR_STAT, GEM_MINOR_STAT } = require("Databases/GemDB");
 
 describe("Current tier gems are a 16 / 7 split", () => {
+  const { GEM_SOLO_STAT } = require("Databases/GemDB");
   const GEM_LOOKUP_FALLBACK = 213482; // What getGemID returns when it can't find a match.
 
   test("the constants are the split the tier actually grants", () => {
@@ -735,14 +736,15 @@ describe("Current tier gems are a 16 / 7 split", () => {
     expect(GEM_MINOR_STAT).toEqual(7);
   });
 
-  test("every current stat gem grants exactly that split", () => {
+  test("every current stat gem is either the split or a single stat", () => {
     const gems = getCurrentStatGems();
     expect(gems.length).toBeGreaterThan(0);
 
     gems.forEach((gem) => {
-      const amounts = Object.values(gem.stats);
-      expect(amounts.length).toEqual(2);
-      expect(amounts.sort((a, b) => b - a)).toEqual([GEM_MAJOR_STAT, GEM_MINOR_STAT]);
+      const amounts = Object.values(gem.stats).sort((a, b) => b - a);
+      // A gem is one or the other - a hybrid at 16/7, or the whole budget in one stat.
+      if (amounts.length === 1) expect(amounts).toEqual([GEM_SOLO_STAT]);
+      else expect(amounts).toEqual([GEM_MAJOR_STAT, GEM_MINOR_STAT]);
     });
   });
 
@@ -1061,5 +1063,131 @@ describe("TopSets keeps what sorting everything would have kept", () => {
     for (let i = 100000; i > 0; i--) top.add({ id: i, hardScore: i });
     expect(top.toArray()).toHaveLength(10);
     expect(scoresOf(top.toArray())).toEqual([100000, 99999, 99998, 99997, 99996, 99995, 99994, 99993, 99992, 99991]);
+  });
+});
+
+/*
+  The single-stat gems. They put everything into one stat rather than splitting 16/7, so they're the right pick
+  whenever one stat is far enough ahead to be worth giving up the split, and the optimiser can't find that unless
+  they're actually in the database.
+*/
+describe("Single-stat gems are searchable", () => {
+  const { getCurrentStatGems, GEM_SOLO_STAT, GEM_MAJOR_STAT, GEM_MINOR_STAT } = require("Databases/GemDB");
+
+  const soloGems = () => getCurrentStatGems().filter((gem) => Object.keys(gem.stats).length === 1);
+
+  test("there is one for each secondary", () => {
+    expect(soloGems().map((gem) => Object.keys(gem.stats)[0]).sort()).toEqual(["crit", "haste", "mastery", "versatility"]);
+  });
+
+  test("each grants the full amount in that stat and nothing else", () => {
+    soloGems().forEach((gem) => {
+      expect(Object.values(gem.stats)).toEqual([GEM_SOLO_STAT]);
+      // Worth more than a hybrid's major stat, which is the entire reason to consider one.
+      expect(GEM_SOLO_STAT).toBeGreaterThan(GEM_MAJOR_STAT);
+      expect(GEM_SOLO_STAT).toBeLessThan(GEM_MAJOR_STAT + GEM_MINOR_STAT);
+    });
+  });
+
+  test("they carry distinct ids and are not mistaken for metas", () => {
+    const ids = soloGems().map((gem) => gem.id);
+    expect(new Set(ids).size).toEqual(4);
+    // getCurrentStatGems already excludes metas, so reaching here at all is the assertion.
+    expect(soloGems().length).toEqual(4);
+  });
+
+  test("Optimize Everything searches them alongside the hybrids", () => {
+    const searched = getGemSearchSpace(cfg({ optimizeAllGearOptions: true }));
+    soloGems().forEach((gem) => expect(searched).toContain(gem.id));
+    expect(searched.length).toEqual(16); // 12 hybrids + 4 solos.
+  });
+
+  test("a set can be gemmed entirely with one of them", () => {
+    const solo = soloGems()[0].id;
+    const best = run(cfg({ selectedGems: [solo], replaceExistingGems: true })).itemSet;
+    // Socket 0 is the meta and is chosen separately, so the stat sockets are the ones that must all be the pick.
+    expect(best.enchantBreakdown["Gems"].slice(1).every((gem) => gem === solo)).toBe(true);
+  });
+});
+
+/*
+  Sharding. A run splits across several workers, each evaluating a disjoint slice of the gear sets and keeping its
+  own best few thousand. The whole point is that this is a speed change and nothing else, so what has to hold is
+  that the merged report matches the one a single thread produces.
+*/
+describe("A sharded run matches an unsharded one", () => {
+  const player = () => {
+    const p = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    GEAR.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      p.addActiveItem(item);
+    });
+    return p;
+  };
+
+  const sharded = (settings, count) => {
+    const p = player();
+    const shards = [];
+    for (let index = 0; index < count; index++) {
+      shards.push(runTopGearShard(p.activeItems, buildNewWepCombos(p, true), p, "Raid", p.getHPS("Raid"),
+                                  settings, p.getActiveModel("Raid"), true, undefined, { index, count }));
+    }
+    return finishTopGear(shards, p, "Raid", p.getActiveModel("Raid"));
+  };
+
+  // Enough of a search that the shards actually have to compete, rather than each trivially keeping everything.
+  const settings = () => cfg(WIDE_SELECTION);
+
+  test("the winning set is identical however many ways it is split", () => {
+    const whole = run(settings());
+
+    [2, 3, 4].forEach((count) => {
+      const split = sharded(settings(), count);
+      expect(split.itemSet.hardScore).toEqual(whole.itemSet.hardScore);
+      expect(split.itemSet.setHPS).toEqual(whole.itemSet.setHPS);
+      expect(split.itemSet.itemList.map((i) => i.id).sort()).toEqual(whole.itemSet.itemList.map((i) => i.id).sort());
+      expect(split.itemSet.enchantBreakdown["Gems"]).toEqual(whole.itemSet.enchantBreakdown["Gems"]);
+    });
+  });
+
+  test("every set is evaluated exactly once across the shards", () => {
+    const whole = run(settings());
+    const split = sharded(settings(), 4);
+
+    // itemsCompared is the kept slice, so it can only match if the shards between them saw the same sets.
+    expect(split.itemsCompared).toEqual(whole.itemsCompared);
+  });
+
+  test("the shards divide the gear sets between them without overlap", () => {
+    const p = player();
+    const built = (count) => {
+      let total = 0;
+      for (let index = 0; index < count; index++) {
+        total += runTopGearShard(p.activeItems, buildNewWepCombos(p, true), p, "Raid", p.getHPS("Raid"),
+                                 cfg(), p.getActiveModel("Raid"), true, undefined, { index, count }).setsBuilt;
+      }
+      return total;
+    };
+
+    const whole = built(1);
+    [2, 3, 4, 5].forEach((count) => expect(built(count)).toEqual(whole));
+  });
+
+  test("close alternatives survive the merge", () => {
+    const whole = run(settings());
+    const split = sharded(settings(), 4);
+
+    expect(split.differentials.length).toEqual(whole.differentials.length);
+    expect(split.differentials.map((d) => d.scoreDifference)).toEqual(whole.differentials.map((d) => d.scoreDifference));
+  });
+
+  test("one shard of one is just the plain run", () => {
+    const whole = run(settings());
+    const single = sharded(settings(), 1);
+
+    expect(single.itemSet.hardScore).toEqual(whole.itemSet.hardScore);
+    expect(single.itemsCompared).toEqual(whole.itemsCompared);
   });
 });
