@@ -298,6 +298,26 @@ function displayReport(
     }
   });
 
+  // Gem position isn't modelled: the engine picks one multiset for the whole set and the report hands them out in
+  // slot order, so which item ends up with which gem is an artefact of that ordering. A gem therefore only counts
+  // as a change if the set as a whole gains one - comparing per item flagged two identical gems trading places as
+  // two changes, and made a run that changes nothing look like it wanted re-gemming.
+  const equippedGemPool = [];
+  fullItemList.forEach((item) => {
+    if (!item.isEquipped) return;
+    (item.gemString || "").split(":").filter((gem) => gem !== "").forEach((gem) => equippedGemPool.push(Number(gem)));
+  });
+  fullItemList.forEach((item) => {
+    item.newGems = (item.socketedGems || []).map((gem) => {
+      const alreadyWorn = equippedGemPool.indexOf(gem);
+      if (alreadyWorn === -1) return true;
+      // Each gem the player owns excuses one recommendation, so asking for two of something they have one of
+      // still marks the second.
+      equippedGemPool.splice(alreadyWorn, 1);
+      return false;
+    });
+  });
+
   // fullItemList includes all items selected, itemList will filter that to only items that were chosen in the top set.
   itemList = fullItemList.filter(item => item.isChosen);
   if (itemList.length === 0) itemList = fullItemList; // Fallback for older reports that don't have non-chosen items on them. Can be removed on a patch launch.

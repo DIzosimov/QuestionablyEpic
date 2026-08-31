@@ -84,19 +84,9 @@ export default function ItemCardReport(props) {
   // An item the player wasn't already wearing is a change in itself, so its gems aren't flagged individually -
   // the card's own ring already says the whole piece is new.
   const isNewItem = gameType === "Retail" && !item.isEquipped && item.slot !== "CombinedWeapon";
-  // The gems the item was wearing in game, carried through the report by shortenReport.
-  const equippedGems = (item.gemString || "").split(":").map(Number).filter((id) => id > 0);
-  // Consumed as we go so a recommendation only counts as unchanged once per gem already socketed: asking for two
-  // of something the player has one of leaves the second one flagged.
-  const unmatchedGems = [...equippedGems];
-  const isNewGem = (gem) => {
-    if (isNewItem || !item.isEquipped || gameType !== "Retail") return false;
-    const alreadyWorn = unmatchedGems.indexOf(gem);
-    if (alreadyWorn === -1) return true;
-    unmatchedGems.splice(alreadyWorn, 1);
-    return false;
-  };
-
+  // Which of this item's gems the set as a whole didn't already have. Worked out across every equipped item in
+  // TopGearReport, because the engine assigns gems to the set rather than to a slot.
+  const newGems = item.newGems || [];
   const isEmbellishment = item.effect && item.effect.type === "embellishment";
   // Coloured with the change ring when the piece carrying it is one the player isn't wearing, so the
   // embellishments that actually need crafting stand out from the ones already on.
@@ -179,8 +169,8 @@ export default function ItemCardReport(props) {
     socket = <div style={{ verticalAlign: "middle" }}>{socket}</div>;
   }*/
   else if (item.socketedGems) {
-    item.socketedGems.forEach(gem => {
-      const changed = isNewGem(gem);
+    item.socketedGems.forEach((gem, socketIndex) => {
+      const changed = !isNewItem && gameType === "Retail" && newGems[socketIndex] === true;
       socket.push(
       <div style={{ display: "inline", marginRight: "5px" }}>
         <Tooltip title={capitalizeFirstLetter(getGemProp(gem, "name")) + (changed ? " - not currently socketed" : "")} arrow>
