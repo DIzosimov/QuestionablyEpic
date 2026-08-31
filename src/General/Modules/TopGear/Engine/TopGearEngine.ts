@@ -496,7 +496,9 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   // This just builds a set and adds it to our array so that we can score it later.
   // A valid set is just any combination of items that is wearable in-game. Item limits like on legendaries, unique items and so on are all adhered to.
   let itemSets = createSets(itemList, wepCombos, player.spec);
-  let resultSets = [];
+  // Retaining every evaluation is what used to make a large run die rather than finish: each scored set holds about
+  // 2kb, so a few million of them exhaust the worker heap long before the run ends. Only the top slice is ever read.
+  const rankedSets = new TopSets(softSlice);
 
   // Tracked so the report can explain why a selected embellished item never shows up in a set.
   const embellishedSelected = itemList.filter((item: Item) => isEmbellished(item)).length;
@@ -569,25 +571,39 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   const reportEvery = Math.max(1, Math.floor(totalEvaluations / 100));
   let evaluated = 0;
 
+  // The bar has to keep moving when a whole set's worth of variants is skipped at once, so report on crossing the
+  // next boundary rather than landing exactly on a multiple of it.
+  let nextReport = reportEvery;
+
   for (var i = 0; i < itemSets.length; i++) {
-    variants.forEach((variant) => {
-      resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
-                              variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined,
-                              variant.consumableOverride || undefined));
-      if (++evaluated % reportEvery === 0) report({ stage: "Evaluating sets", done: evaluated, total: totalEvaluations });
-    });
+    for (var v = 0; v < variants.length; v++) {
+      const variant = variants[v];
+      const scoredSet = evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
+                                variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined,
+                                variant.consumableOverride || undefined);
+
+      // A set is unwearable because of the items in it - a second vault piece, a third embellishment - and the gems,
+      // enchants and consumables layered over the top can't change that. So the first variant settles it for every
+      // other variant of the same set, and the rest are worth neither evaluating nor keeping.
+      const wearable = v > 0 || scoredSet.verifySet(userSettings);
+      if (wearable) rankedSets.add(scoredSet);
+
+      evaluated += wearable ? 1 : variants.length;
+      if (evaluated >= nextReport) {
+        report({ stage: "Evaluating sets", done: evaluated, total: totalEvaluations });
+        nextReport = evaluated + reportEvery;
+      }
+      if (!wearable) break;
+    }
   }
 
   report({ stage: "Ranking results", done: totalEvaluations, total: totalEvaluations });
 
 
   // == Sort and Prune sets ==
-  // Prune sets (discard weak sets) outside of our top X sets (usually around 3000 but you can find the variable at the top of this file). This just makes anything further we do faster while not having
-  // an impact on results.
-  //itemSets.sort((a, b) => (a.hardScore < b.hardScore ? 1 : -1));
-  resultSets.sort((a, b) => (a.hardScore < b.hardScore ? 1 : -1));
-  //itemSets = pruneItems(itemSets, userSettings);
-  resultSets = pruneSets(resultSets, userSettings);
+  // Only the best few thousand sets are ever read, so the ranking is collected as the run goes rather than sorted
+  // at the end. See TopSets for why that picks the same sets the old sort-everything-then-slice did.
+  const resultSets = rankedSets.toArray();
   
   // == Build Differentials (sets similar in strength) ==
   // A differential is a set that wasn't our best but was close. We'll display these beneath our top gear so that a player could choose a higher stamina option, or a trinket they prefer
@@ -891,13 +907,46 @@ function pruneItems(itemSets: ItemSet[], userSettings: any) {
   return temp.slice(0, softSlice);
 }
 
-function pruneSets(resultSets: any[], userSettings: any) {
-  
-  let temp = resultSets.filter(function (result) {
-    return result.verifySet(userSettings);
-  });
+/**
+ * Collects the best `limit` sets out of a stream without holding on to the rest.
+ *
+ * This picks exactly the sets that sorting every result and slicing the top `limit` used to pick: hardScore is final
+ * the moment evalSet returns and is never touched again, and taking the top N of a stream by a fixed key matches
+ * taking the top N of the fully sorted list - a set is only dropped once `limit` better ones exist, which is just as
+ * true at the end of the run as it was at the time. Sets tied on score can swap places, since the comparator below
+ * never returns 0 and so leaves ties unordered either way.
+ *
+ * Sets are admitted only once they beat the current cut-off, and the buffer is trimmed in batches, so the cost is one
+ * sort of 2*limit per limit admissions rather than a sort per set.
+ */
+export class TopSets {
+  private limit: number;
+  private buffer: any[] = [];
+  private cutoff: number = -Infinity;
 
-  return temp.slice(0, softSlice);
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  add(set: any): void {
+    if (set.hardScore < this.cutoff) return;
+    this.buffer.push(set);
+    if (this.buffer.length >= this.limit * 2) this.trim();
+  }
+
+  /** The kept sets, best first. */
+  toArray(): any[] {
+    this.trim();
+    return this.buffer;
+  }
+
+  private trim(): void {
+    this.buffer.sort((a, b) => (a.hardScore < b.hardScore ? 1 : -1));
+    if (this.buffer.length > this.limit) {
+      this.buffer.length = this.limit;
+      this.cutoff = this.buffer[this.limit - 1].hardScore;
+    }
+  }
 }
 
 

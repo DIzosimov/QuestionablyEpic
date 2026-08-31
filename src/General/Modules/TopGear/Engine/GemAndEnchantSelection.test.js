@@ -1,7 +1,7 @@
 import Player from "General/Modules/Player/Player";
 import Item from "General/Items/Item";
 import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
-import { runTopGear } from "./TopGearEngine";
+import { runTopGear, TopSets } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
 import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import rootReducer from "Redux/Reducers/RootReducer";
@@ -988,5 +988,62 @@ describe("Flasks and food can be multi-selected", () => {
     const all = cfg({ detailedGearOptions: false, optimizeAllGearOptions: true });
     expect(getConsumableSearchSpace(all)).toEqual(CONSUMABLE_OPTIONS);
     expect(countConsumableCombinations(all)).toEqual(CONSUMABLE_OPTIONS.flask.length * CONSUMABLE_OPTIONS.food.length);
+  });
+});
+
+/*
+  The ranking collector. Sets are scored in the millions but only the top few thousand are ever read, so they're
+  collected as the run goes rather than sorted at the end. What has to hold is that this keeps the same sets the old
+  sort-everything-then-slice kept, since that's the entire basis for doing it.
+*/
+describe("TopSets keeps what sorting everything would have kept", () => {
+  // Scores only - the collector never looks at anything else on a set.
+  const scored = (scores) => scores.map((hardScore, id) => ({ id, hardScore }));
+  const sortThenSlice = (sets, limit) =>
+    [...sets].sort((a, b) => (a.hardScore < b.hardScore ? 1 : -1)).slice(0, limit);
+  const collect = (sets, limit) => {
+    const top = new TopSets(limit);
+    sets.forEach((set) => top.add(set));
+    return top.toArray();
+  };
+  // Ties are unordered either way - the comparator never returns 0 - so the scores kept are the contract, not which
+  // of two equally scoring sets fills the last slot.
+  const scoresOf = (sets) => sets.map((set) => set.hardScore);
+
+  test("a stream longer than the limit matches sorting the lot", () => {
+    const sets = scored(Array.from({ length: 5000 }, (_, i) => (i * 7919) % 5000));
+    expect(scoresOf(collect(sets, 100))).toEqual(scoresOf(sortThenSlice(sets, 100)));
+  });
+
+  test("arrival order doesn't change what survives", () => {
+    const scores = Array.from({ length: 2000 }, (_, i) => (i * 104729) % 1000);
+    const ascending = scored([...scores].sort((a, b) => a - b));
+    const descending = scored([...scores].sort((a, b) => b - a));
+    // Worst-first is the hard case: every set beats the running cut-off and the buffer churns constantly.
+    expect(scoresOf(collect(ascending, 50))).toEqual(scoresOf(collect(descending, 50)));
+  });
+
+  test("ties at the cut-off don't cost a slot", () => {
+    const sets = scored([...Array(200).fill(10), ...Array(200).fill(5)]);
+    const kept = collect(sets, 300);
+    expect(kept).toHaveLength(300);
+    expect(scoresOf(kept)).toEqual(scoresOf(sortThenSlice(sets, 300)));
+  });
+
+  test("fewer sets than the limit are all kept, best first", () => {
+    const sets = scored([3, 1, 4, 1, 5]);
+    expect(scoresOf(collect(sets, 100))).toEqual([5, 4, 3, 1, 1]);
+  });
+
+  test("nothing added yields nothing", () => {
+    expect(collect([], 100)).toEqual([]);
+  });
+
+  test("the buffer never grows without bound", () => {
+    const top = new TopSets(10);
+    // Fed best-first, so every later set is below the cut-off and must be dropped rather than accumulated.
+    for (let i = 100000; i > 0; i--) top.add({ id: i, hardScore: i });
+    expect(top.toArray()).toHaveLength(10);
+    expect(scoresOf(top.toArray())).toEqual([100000, 99999, 99998, 99997, 99996, 99995, 99994, 99993, 99992, 99991]);
   });
 });
