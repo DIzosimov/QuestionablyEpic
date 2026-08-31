@@ -59,7 +59,7 @@ type ShortReport = {
 }
 
 // The stages a run moves through, in order. Used to work out which shards are far enough along to be summed.
-const STAGE_ORDER = ["Building gear sets", "Evaluating sets", "Ranking results"];
+const STAGE_ORDER = ["Preparing", "Evaluating sets", "Ranking results"];
 
 
 /**

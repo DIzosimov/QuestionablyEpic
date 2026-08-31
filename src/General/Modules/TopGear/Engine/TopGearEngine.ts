@@ -492,7 +492,9 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
                             baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true,
                             onProgress?: TopGearProgressCallback, shard: TopGearShard = WHOLE_RUN): TopGearShardResult {
   const report = onProgress || (() => {});
-  report({ stage: "Building gear sets", done: 0, total: 0 });
+  // Sets are built and scored together, so there's no separate building stage to report - only the setup before
+  // any of it starts, which has nothing to count.
+  report({ stage: "Preparing", done: 0, total: 0 });
   //console.log("Running Top Gear")
   // == Setup Player & Cast Model ==
   // Create player / cast model objects in this thread based on data from the player character & player model.
@@ -511,9 +513,10 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   userSettings = JSON.parse(JSON.stringify(userSettings));
 
   // == Create Valid Item Sets ==
-  // This just builds a set and adds it to our array so that we can score it later.
   // A valid set is just any combination of items that is wearable in-game. Item limits like on legendaries, unique items and so on are all adhered to.
-  let itemSets = createSets(itemList, wepCombos, player.spec, report, shard);
+  // Sets are built and scored one at a time further down rather than collected first, so only their count is
+  // needed here - and that's exact arithmetic on the item list, not something we have to build to find out.
+  const mySetCount = shardSetCount(countGearSets(itemList, wepCombos), shard);
   // Retaining every evaluation is what used to make a large run die rather than finish: each scored set holds about
   // 2kb, so a few million of them exhaust the worker heap long before the run ends. Only the top slice is ever read.
   const rankedSets = new TopSets(softSlice);
@@ -535,8 +538,6 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
     reportError(newPlayer, "Top Gear", "Failed to evaluate equipped set for upgrade comparison", String(err));
   }
 
-  itemSets.sort((a, b) => (a.sumSoftScore < b.sumSoftScore ? 1 : -1));
-  
   // == Evaluate Sets ==
   // We'll explain this more in the evalSet function header but we assign each set a score that includes stats, effects and more.
   // Selecting several gems expands each set into one candidate per gem loadout, which are then ranked together -
@@ -547,7 +548,7 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   // Sockets are only known per set, but they're bounded, so build loadouts against the largest set and let each
   // evaluation take the slice it needs. Socket 0 is the meta, which is chosen separately, so a loadout only ever
   // fills the stat sockets - building it a gem longer just produces siblings that differ in an entry nobody reads.
-  const maxSockets = itemSets.reduce((most: number, set: ItemSet) => Math.max(most, set.itemList.reduce((n: number, item: Item) => n + (item.socket || 0), 0)), 0);
+  const maxSockets = maxGearSockets(itemList, wepCombos);
   const maxStatSockets = Math.max(0, maxSockets - 1);
   const variantLimit = resolveVariantLimit(userSettings);
   // Raising the limit past the default raises the gem cap too - a player widening the search wants it widened
@@ -584,11 +585,10 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
 
   // Evaluations, not sets: with variants a single set is scored once per configuration, and that multiplier is
   // exactly what makes a run long enough to need a progress bar in the first place.
-  // createSets already handed back just this shard's sets, dealt out round robin rather than in blocks:
-  // neighbouring sets are near-identical in build order, so a block split would hand one worker all the good sets
-  // and leave another with nothing worth keeping. Round robin gives every shard the same spread of quality, which
-  // matters because each keeps only its own top slice.
-  const totalEvaluations = itemSets.length * variants.length;
+  // Sets are dealt out round robin rather than in blocks: neighbouring sets are near-identical in build order, so
+  // a block split would hand one worker all the good sets and leave another with nothing worth keeping. Round
+  // robin gives every shard the same spread of quality, which matters because each keeps only its own top slice.
+  const totalEvaluations = mySetCount * variants.length;
   // Report ~100 times over the run, so the bar moves smoothly without the postMessage traffic becoming the cost.
   const reportEvery = Math.max(1, Math.floor(totalEvaluations / 100));
   let evaluated = 0;
@@ -597,10 +597,10 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   // next boundary rather than landing exactly on a multiple of it.
   let nextReport = reportEvery;
 
-  for (var i = 0; i < itemSets.length; i++) {
+  const setsBuilt = forEachGearSet(itemList, wepCombos, player.spec, (gearSet) => {
     for (var v = 0; v < variants.length; v++) {
       const variant = variants[v];
-      const scoredSet = evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
+      const scoredSet = evalSet(gearSet, newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
                                 variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined,
                                 variant.consumableOverride || undefined);
 
@@ -617,11 +617,11 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
       }
       if (!wearable) break;
     }
-  }
+  }, shard);
 
   report({ stage: "Ranking results", done: totalEvaluations, total: totalEvaluations });
 
-  return { rankedSets: rankedSets.toArray(), setsBuilt: itemSets.length, embellishedSelected, equippedHPS };
+  return { rankedSets: rankedSets.toArray(), setsBuilt, embellishedSelected, equippedHPS };
 }
 
 /**
@@ -724,6 +724,27 @@ export function countGearSets(itemList: Item[], wepCombos: Item[]): number {
 }
 
 /**
+ * The most sockets any set can have. Slots are chosen independently, so the largest set is just the best-socketed
+ * item in each slot - no need to build a set to find it.
+ */
+export function maxGearSockets(itemList: Item[], wepCombos: any[]): number {
+  const splitItems = splitBySlot(itemList);
+  const best = (items: Item[], take: number) =>
+    items.map((item) => item.socket || 0).sort((a, b) => b - a).slice(0, take).reduce((sum, n) => sum + n, 0);
+
+  const armour = Object.entries(splitItems).reduce((total, [slot, items]) =>
+    total + best(items, slot === "Finger" || slot === "Trinket" ? 2 : 1), 0);
+  const weapon = wepCombos.reduce((most: number, combo: any) =>
+    Math.max(most, ([] as any[]).concat(combo).reduce((n: number, item: any) => n + ((item && item.socket) || 0), 0)), 0);
+
+  return armour + weapon;
+}
+
+/** How many of the run's sets belong to one shard. */
+export const shardSetCount = (totalSets: number, shard: TopGearShard): number =>
+  Math.floor(totalSets / shard.count) + (shard.index < totalSets % shard.count ? 1 : 0);
+
+/**
  * Roughly how many evaluations a run will make. Used to decide how many workers to spend on it: a worker costs a
  * full engine and database initialisation before it does any work, which a small run can never earn back.
  *
@@ -731,12 +752,7 @@ export function countGearSets(itemList: Item[], wepCombos: Item[]): number {
  * picks a worker count - being out by a factor of two changes how fast the run is, never what it returns.
  */
 export function estimateEvaluations(itemList: Item[], wepCombos: Item[], userSettings: any, spec: string): number {
-  const splitItems = splitBySlot(itemList);
-  const sockets = Object.entries(splitItems).reduce((total, [slot, items]) => {
-    const best = items.map((item) => item.socket || 0).sort((a, b) => b - a);
-    return total + best.slice(0, slot === "Finger" || slot === "Trinket" ? 2 : 1).reduce((sum, n) => sum + n, 0);
-  }, 0);
-
+  const sockets = maxGearSockets(itemList, wepCombos);
   const searchedGems = getGemSearchSpace(userSettings);
   const variants = Math.min(
     resolveVariantLimit(userSettings),
@@ -756,12 +772,19 @@ const countPairs = (items: Item[], canPair: (a: Item, b: Item) => boolean) => {
   return pairs;
 };
 
-function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report: TopGearProgressCallback = () => {},
-                    shard: TopGearShard = WHOLE_RUN) {
+/**
+ * Walks every wearable gear set, handing each to `onSet` as it is made.
+ *
+ * Nothing is collected. Holding the sets cost about 790 bytes each - fine at a few thousand, but a selection with
+ * millions of combinations exhausted the worker's heap before a single set had been scored. Streaming them means
+ * a set is scored and discarded before the next is built, so memory no longer depends on how big the search is.
+ */
+function forEachGearSet(itemList: Item[], rawWepCombos: Item[], spec: string, onSet: (set: ItemSet) => void,
+                        shard: TopGearShard = WHOLE_RUN): number {
   const wepCombos = deepCopyFunction(rawWepCombos);
  
-  let setCount = 0;
-  let itemSets = [];
+  let setCount = 0;   // Index across the whole run, so shards divide the sets without overlap.
+  let built = 0;      // How many this shard actually made.
   let slotLengths: {[key: string]: number} = {
     Head: 0,
     Neck: 0,
@@ -803,15 +826,9 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report
   }
   slotLengths.Weapon = wepCombos.length;
 
-  // The number of sets the loops below will actually produce - not an estimate.
-  const totalSets = countGearSets(itemList, wepCombos);
   // A shard builds only its own sets. Every shard still walks the whole combination space - that's just index
   // arithmetic - but skips assembling the item list, scoring it and allocating an ItemSet for the sets it doesn't
   // own, which is nearly all of the cost.
-  const myTotal = Math.floor(totalSets / shard.count) + (shard.index < totalSets % shard.count ? 1 : 0);
-  // Report about a hundred times over the build, matching the evaluation stage.
-  const reportEvery = Math.max(1, Math.floor(myTotal / 100));
-  report({ stage: "Building gear sets", done: 0, total: myTotal });
 
   for (var head = 0; head < slotLengths.Head; head++) {
     let softScore = { head: splitItems.Head[head].softScore,
@@ -900,8 +917,8 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report
                                       if (wepCombos[weapon].length > 1) includedItems.push(wepCombos[weapon][1])
                                       //console.log(JSON.stringify(wepCombos[weapon]));
                                       let sumSoft = sumScore(softScore);
-                                      itemSets.push(new ItemSet(setCount, includedItems, sumSoft, spec));
-                                      if (itemSets.length % reportEvery === 0) report({ stage: "Building gear sets", done: itemSets.length, total: myTotal });
+                                      onSet(new ItemSet(setCount, includedItems, sumSoft, spec));
+                                      built++;
                                     }
                                     setCount++;
                                   }
@@ -922,11 +939,7 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string, report
     }
   }
 
-  // The throttled reports above land on multiples of reportEvery, so the last one stops short of the total. Say so
-  // explicitly rather than leaving the stage sitting at 99% while it hands over.
-  report({ stage: "Building gear sets", done: itemSets.length, total: myTotal });
-
-  return itemSets;
+  return built;
 }
 
 function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, contentType: contentTypes, castModelType: string) {

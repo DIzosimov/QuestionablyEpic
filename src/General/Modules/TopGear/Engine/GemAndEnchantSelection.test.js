@@ -680,13 +680,14 @@ describe("A run reports its progress", () => {
     return { result, updates };
   };
 
-  test("it reports set building first, then evaluation, then ranking", () => {
+  test("it reports setup first, then evaluation, then ranking", () => {
     const { updates } = runWithProgress(cfg());
     const stages = [...new Set(updates.map((u) => u.stage))];
 
-    expect(stages[0]).toEqual("Building gear sets");
-    expect(stages[stages.length - 1]).toEqual("Ranking results");
-    expect(updates[0].total).toEqual(0); // No total until the sets exist to count.
+    // Sets are built and scored together, so there is no separate building stage - just the setup before any of
+    // it starts, which has nothing to count.
+    expect(stages).toEqual(["Preparing", "Evaluating sets", "Ranking results"]);
+    expect(updates[0].total).toEqual(0);
   });
 
   test("done climbs to exactly the total, and never past it", () => {
@@ -1193,11 +1194,11 @@ describe("A sharded run matches an unsharded one", () => {
 });
 
 /*
-  Build progress. A big selection spends real time building gear sets before a single one is evaluated, and until
-  the engine reported that stage the bar sat still with nothing to show. The count has to be exact - a total the
-  build never reaches leaves the bar stuck short forever.
+  Run size. Sets are built and scored one at a time rather than collected first, so the run's total is worked out
+  from the item list before anything is built. That total has to be exact - it's what the bar counts against, and
+  a total the run never reaches would leave it stuck short forever.
 */
-describe("Building gear sets reports a total it actually reaches", () => {
+describe("A run knows its size before it starts", () => {
   const withGear = (extraGear = []) => {
     const p = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
     [...GEAR, ...extraGear].forEach(([id, slot]) => {
@@ -1209,50 +1210,51 @@ describe("Building gear sets reports a total it actually reaches", () => {
     return p;
   };
 
-  const buildStage = (player) => {
+  const evaluating = (player, settings = cfg()) => {
     const seen = [];
-    runTopGearShard(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
-                    cfg(), player.getActiveModel("Raid"), true, (update) => seen.push({ ...update }));
-    return seen.filter((update) => update.stage === "Building gear sets" && update.total > 0);
+    const result = runTopGearShard(player.activeItems, buildNewWepCombos(player, true), player, "Raid",
+                                   player.getHPS("Raid"), settings, player.getActiveModel("Raid"), true,
+                                   (update) => { if (update.stage === "Evaluating sets") seen.push({ ...update }); });
+    return { seen, result };
   };
 
-  test("the promised total is the number of sets that get built", () => {
-    const player = withGear();
-    const building = buildStage(player);
-    expect(building.length).toBeGreaterThan(0);
-
-    // Every set built is evaluated once per variant, and an untouched profile has exactly one variant, so the
-    // evaluation total is the set count the build stage promised.
-    const evaluating = [];
-    runTopGearShard(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
-                    cfg(), player.getActiveModel("Raid"), true, (update) => {
-                      if (update.stage === "Evaluating sets") evaluating.push(update);
-                    });
-    expect(evaluating[evaluating.length - 1].total).toEqual(building[0].total);
+  test("the total is right from the very first report", () => {
+    const { seen } = evaluating(withGear());
+    expect(seen.length).toBeGreaterThan(0);
+    // Not refined as it goes - the first report already knows how much work there is.
+    expect(new Set(seen.map((update) => update.total)).size).toEqual(1);
   });
 
-  test("more gear means more sets to build", () => {
-    const few = buildStage(withGear())[0].total;
-    const more = buildStage(withGear([[268229, "Head"], [268224, "Chest"]]))[0].total;
+  test("the promised total is the work actually done", () => {
+    const player = withGear();
+    const { seen, result } = evaluating(player);
+    // One variant on an untouched profile, so the evaluation total is exactly the sets built.
+    expect(seen[0].total).toEqual(result.setsBuilt);
+    expect(seen[0].total).toEqual(countGearSets(player.activeItems, buildNewWepCombos(player, true)));
+  });
+
+  test("extra rings and trinkets are counted as pairs, not as a product", () => {
+    // The slots that take two items are where a plain product would promise sets the run never builds.
+    const player = withGear([[268248, "Finger"], [270174, "Trinket"]]);
+    const { seen, result } = evaluating(player);
+
+    expect(seen[0].total).toEqual(result.setsBuilt);
+  });
+
+  test("more gear means more work", () => {
+    const few = evaluating(withGear()).seen[0].total;
+    const more = evaluating(withGear([[268229, "Head"], [268224, "Chest"]])).seen[0].total;
 
     expect(more).toBeGreaterThan(few);
   });
 
-  test("the count reaches the total rather than stopping short", () => {
-    // Extra rings and trinkets are the case that used to be hard to count: those slots take unordered pairs, and
-    // matching ids are skipped, so a plain product would promise more sets than the loops ever build.
-    const player = withGear([[268248, "Finger"], [270174, "Trinket"]]);
-    const building = buildStage(player);
-    const promised = building[0].total;
+  test("variants multiply the total", () => {
+    const player = withGear();
+    const plain = evaluating(player).seen[0].total;
+    const wide = evaluating(player, cfg(WIDE_SELECTION)).seen[0].total;
 
-    expect(building[building.length - 1].done).toBeLessThanOrEqual(promised);
-    // The evaluation stage counts the sets that were actually built, so this pins the promise against reality.
-    const evaluating = [];
-    runTopGearShard(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
-                    cfg(), player.getActiveModel("Raid"), true, (update) => {
-                      if (update.stage === "Evaluating sets") evaluating.push(update);
-                    });
-    expect(evaluating[evaluating.length - 1].total).toEqual(promised);
+    expect(wide % plain).toEqual(0);
+    expect(wide).toBeGreaterThan(plain);
   });
 });
 
