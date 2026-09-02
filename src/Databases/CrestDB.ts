@@ -1,18 +1,16 @@
+import { CONSTANTS } from "General/Engine/CONSTANTS";
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                     Upgrade costs and crests                                   */
 /* ---------------------------------------------------------------------------------------------- */
 // What it costs to push an item up its upgrade track, and which currency pays for it.
 //
-// Both tables below are game data the app has no way to derive, so both are deliberately empty rather than
-// guessed. Nothing here is inferred from item levels or track names: attributing a character's crests to the
-// wrong tier, or mispricing a rank, produces recommendations that are confidently wrong and look entirely
-// plausible - you'd be told to spend crests you don't have and to skip upgrades you can afford.
+// Attributing a character's crests to the wrong tier, or mispricing a rank, produces recommendations that are
+// confidently wrong and look entirely plausible - you'd be told to spend crests you don't have and to skip
+// upgrades you can afford. So the tier names below were confirmed against a real character rather than inferred,
+// and the crafted tracks are left unpriced rather than guessed at.
 //
-// The planner treats an empty table as "we can't price this" and returns no plan, which is why the crest spending
-// feature reports that it has no cost data rather than showing a wrong one.
-
-/** Valorstones, which every upgrade costs alongside its crests. */
-export const VALORSTONE_CURRENCY = 1792;
+// Valorstones are not modelled: that system is gone.
 
 /**
  * Which crest tier each SimC currency id is.
@@ -37,16 +35,35 @@ export type UpgradeCost = {
   toLevel: number;
   crest: string;      // the tier name, as used in CREST_CURRENCIES
   crests: number;
-  valorstones: number;
 };
+
+/** Every rank costs the same, so the table below is derived rather than typed out. */
+export const CRESTS_PER_UPGRADE = 20;
 
 /**
  * The ranks of each upgrade track, cheapest first.
  *
- * Keyed by the track names the app already uses - Adventurer, Veteran, Champion, Hero, Myth, Runed Crafted and
- * Gilded Crafted, per CONSTANTS.itemLevelCaps.
+ * Derived rather than hand written: a rank is one step up the item level ladder, every rank costs the same, and a
+ * track is paid for with the crest of its own name. That leaves nothing to keep in step by hand except the ladder
+ * and the caps, which the app already had.
+ *
+ * The crafted tracks are absent. They cap out like any other but there is no crest named after them, and which
+ * crest pays for a crafted upgrade isn't something the app can work out - so crafted items simply don't appear in
+ * a spending plan rather than being priced with a guess.
  */
-export const UPGRADE_COSTS: { [track: string]: UpgradeCost[] } = {};
+export const UPGRADE_COSTS: { [track: string]: UpgradeCost[] } = Object.keys(CONSTANTS.itemLevelCaps)
+  .filter((track) => Object.values(CREST_CURRENCIES).includes(track))
+  .reduce((tracks: { [track: string]: UpgradeCost[] }, track) => {
+    const levels = CONSTANTS.fullItemLevels.filter((level: number) => level <= CONSTANTS.itemLevelCaps[track]);
+
+    tracks[track] = levels.slice(0, -1).map((fromLevel: number, i: number) => ({
+      fromLevel,
+      toLevel: levels[i + 1],
+      crest: track,
+      crests: CRESTS_PER_UPGRADE,
+    }));
+    return tracks;
+  }, {});
 
 /** Whether we know enough to price upgrades at all. */
 export const hasCrestData = (): boolean =>

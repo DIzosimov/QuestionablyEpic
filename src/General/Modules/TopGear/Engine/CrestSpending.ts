@@ -1,4 +1,4 @@
-import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData, VALORSTONE_CURRENCY } from "Databases/CrestDB";
+import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData } from "Databases/CrestDB";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                        Crest spending                                          */
@@ -8,6 +8,10 @@ import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData, VALORSTONE
 // Greedy by efficiency: repeatedly take the affordable upgrade that gains the most healing per crest, then look
 // again. That answers the question actually being asked - "what do I spend next" - and produces an ordered list
 // rather than one target set the player may not be able to reach in a single go.
+//
+// Every rank currently costs the same, so ranking by healing per crest comes out the same as ranking by healing.
+// It's still divided through: the budget is per tier, and the day a rank costs something different this keeps
+// ordering them correctly rather than silently going wrong.
 //
 // Greedy isn't provably optimal. It can be beaten where a cheap upgrade unlocks a much better expensive one, so
 // the list is a spending order rather than a claim of the best possible outcome.
@@ -20,7 +24,6 @@ export type UpgradeStep = {
   toLevel: number;
   crest: string;
   crests: number;
-  valorstones: number;
 };
 
 export type PlannedPurchase = UpgradeStep & {
@@ -42,7 +45,6 @@ export function upgradeStepsFor(item: any): UpgradeStep[] {
     toLevel: rank.toLevel,
     crest: rank.crest,
     crests: rank.crests,
-    valorstones: rank.valorstones,
   }));
 }
 
@@ -50,13 +52,12 @@ const canAfford = (step: UpgradeStep, budget: CrestBudget): boolean => {
   const currency = crestCurrency(step.crest);
   if (!currency) return false; // A tier we can't identify is never spent - see CrestDB.
 
-  return (budget[currency] || 0) >= step.crests && (budget[VALORSTONE_CURRENCY] || 0) >= step.valorstones;
+  return (budget[currency] || 0) >= step.crests;
 };
 
 const pay = (step: UpgradeStep, budget: CrestBudget): CrestBudget => ({
   ...budget,
   [crestCurrency(step.crest)]: (budget[crestCurrency(step.crest)] || 0) - step.crests,
-  [VALORSTONE_CURRENCY]: (budget[VALORSTONE_CURRENCY] || 0) - step.valorstones,
 });
 
 /**
@@ -97,7 +98,6 @@ export function planCrestSpending(items: any[], budget: CrestBudget, gainOf: (st
     const { step, gain, efficiency, queue } = best;
     remaining = pay(step, remaining);
     spent[crestCurrency(step.crest)] = (spent[crestCurrency(step.crest)] || 0) + step.crests;
-    spent[VALORSTONE_CURRENCY] = (spent[VALORSTONE_CURRENCY] || 0) + step.valorstones;
 
     plan.push({ ...step, gain, efficiency, spent: { ...spent } });
     queue.shift();
