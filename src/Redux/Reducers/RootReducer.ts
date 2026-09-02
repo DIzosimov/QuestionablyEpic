@@ -64,7 +64,11 @@ const initialState : RootState = {
     optimizeAllGearOptions: {value: false, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
     selectedGems: {value: [], options: [], category: "gems", type: "hidden", gameType: "Retail"},
     selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
-    replaceExistingGems: {value: true, options: [true, false], category: "gems", type: "hidden", gameType: "Retail"},
+    // Top level rather than part of the detailed panel: it answers "am I willing to re-gem and re-enchant", which
+    // is a question about the run itself, not about pinning individual choices. Off keeps the gems, enchants and
+    // runes the player already has and only fills what's empty. The key still says gems because renaming it would
+    // quietly reset the choice on every saved profile.
+    replaceExistingGems: {value: true, options: [true, false], category: "topGear", type: "selector", gameType: "Retail"},
     enchantChoices: {value: {}, options: [], category: "enchants", type: "hidden", gameType: "Retail"},
     // How far the gem x enchant expansion is allowed to run. 0 means no limit - every combination is evaluated,
     // which is exhaustive but grows fast, so the panel shows the projected count before a run.

@@ -19,7 +19,7 @@ import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngine
 import Item from "General/Items/Item";
 import { gemDB, getCurrentStatGems, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
 import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, RING_SLOTS, enchantSlotSource,
-         WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION, BEST_SECONDARY } from "Databases/EnchantDB";
+         WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION, BEST_SECONDARY, getEnchantByEnchantID } from "Databases/EnchantDB";
 import { getFolioEffect, getFolioGems, buildFolioCombinations, countFolioCombinations, getShortName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
@@ -196,7 +196,7 @@ function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes
 
   // keepEquippedGems is how the equipped set asks for its own gems regardless of the setting - it's measuring what
   // the player is actually wearing, not what they'd have after re-gemming.
-  if (!keepEquippedGems && getGearOption(userSettings, "replaceExistingGems", true) !== false) return buildAutomatic();
+  if (!keepEquippedGems && !keepsExistingGear(userSettings)) return buildAutomatic();
 
   // Fill-empty mode: keep what's already socketed, top up the rest. Equipped gems come from the SimC import,
   // which stores them on the item as a colon separated gemString.
@@ -301,6 +301,19 @@ export function countGemLoadouts(gemCount: number, sockets: number): number {
 // real cost of a run from the same numbers the engine will use.
 
 /** The gems a run will try in each stat socket. */
+/**
+ * Whether the player wants to keep the gems, enchants and runes they already have.
+ *
+ * Read straight from the settings rather than through getGearOption: it's a top level Top Gear option, not one of
+ * the detailed gear panel's, so it has to work on a plain run. The key still says gems because renaming it would
+ * quietly reset the choice on every saved profile.
+ */
+export function keepsExistingGear(userSettings: any): boolean {
+  const setting = userSettings ? userSettings.replaceExistingGems : undefined;
+  const value = setting && typeof setting === "object" ? setting.value : setting;
+  return value === false || value === "false";
+}
+
 export function getGemSearchSpace(userSettings: any): number[] {
   if (isOptimizeAllGear(userSettings)) return getCurrentStatGems().map((gem) => gem.id);
   const pinned = getGearOption(userSettings, "selectedGems", []);
@@ -323,6 +336,9 @@ export function normaliseEnchantChoices(choices: any): any {
 
 /** The enchants a run will try in each slot. */
 export function getEnchantSearchSpace(userSettings: any, spec: string): any {
+  // Keeping the player's enchants means every combination scores the same on the slots they already have, so
+  // searching them is pure cost. Slots with nothing on fall back to the automatic pick.
+  if (keepsExistingGear(userSettings)) return {};
   if (!isOptimizeAllGear(userSettings)) return pinnedSlots(normaliseEnchantChoices(getGearOption(userSettings, "enchantChoices", {})));
 
   const everything: { [slot: string]: string[] } = {};
@@ -1151,8 +1167,34 @@ function applyEnchant(bonus_stats: Stats, enchant: any, highestWeight: string) {
   if (enchant.manaPerc) bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * enchant.manaPerc;
 }
 
-function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string, userSettings: any = {}, enchantOverride?: any) {
+/**
+ * The enchants the set's items came in wearing, by slot.
+ *
+ * Only enchants carrying an enchantID can be recognised, so anything else is simply absent and the slot resolves
+ * normally. Rings are numbered by the order they appear, matching how the report labels them.
+ */
+function wornEnchants(itemList: any[]): { [slot: string]: any } {
+  const worn: { [slot: string]: any } = {};
+  let ringsSeen = 0;
+
+  (itemList || []).forEach((item: any) => {
+    const isRing = item.slot === "Finger";
+    // Counted for every ring, enchanted or not, so the second ring is still Finger2 when the first has nothing on.
+    const slot = isRing ? "Finger" + ++ringsSeen : (String(item.slot).includes("Weapon") ? "CombinedWeapon" : item.slot);
+
+    const enchant = getEnchantByEnchantID(item.enchantID || 0);
+    if (enchant && !worn[slot]) worn[slot] = enchant;
+  });
+
+  return worn;
+}
+
+function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string, userSettings: any = {}, enchantOverride?: any, itemList: any[] = []) {
   let enchants: {[key: string]: string | number | number[]} = {}; // TODO: Cleanup
+  // With "replace what I've enchanted" off, a slot that already has an enchant keeps it and the engine only
+  // decides the empty ones. Unmodelled enchants are recognised too, so a weapon carrying one is left alone
+  // rather than being quietly re-enchanted.
+  const worn = keepsExistingGear(userSettings) ? wornEnchants(itemList) : {};
 
   // Rings. Every ring enchant grants the same amount, so Automatic picks the one matching the player's best stat.
   // We use the highest stat weight rather than an adjusted weight - the difference is a fraction of a percent and
@@ -1163,7 +1205,7 @@ function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, conte
   // the same enchant on both is just the case where the two happen to agree, and it lands twice as it should.
   // Splitting them matters because secondaries diminish: 29 crit and 29 haste can beat 58 of either.
   RING_SLOTS.forEach((slot) => {
-    let ringEnchant = getPinnedEnchant(userSettings, slot, enchantOverride);
+    let ringEnchant = worn[slot] || getPinnedEnchant(userSettings, slot, enchantOverride);
     if (!ringEnchant || !ringEnchant.slots.includes("Finger")) {
       // Automatic: Eyes of the Eagle where the spec uses it, otherwise the enchant matching their best stat.
       ringEnchant = getDefaultEnchant(slot, spec) ||
@@ -1178,14 +1220,14 @@ function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, conte
 
   // Armour slots. One entry each today, but they read from the DB so adding options is a data change.
   ["Head", "Chest", "Shoulder", "Legs", "Feet"].forEach((slot) => {
-    const enchant = getSlotEnchant(userSettings, slot, spec, enchantOverride);
+    const enchant = worn[slot] || getSlotEnchant(userSettings, slot, spec, enchantOverride);
     applyEnchant(bonus_stats, enchant, highestWeight);
     enchants[slot] = enchant ? enchant.name : "";
   });
 
   // Weapon. Automatic keeps the per-spec default; the secondary enchants are budgeted higher than the intellect
   // one, so this is a real choice rather than a cosmetic one.
-  const weaponEnchant = getSlotEnchant(userSettings, "CombinedWeapon", spec, enchantOverride);
+  const weaponEnchant = worn["CombinedWeapon"] || getSlotEnchant(userSettings, "CombinedWeapon", spec, enchantOverride);
   applyEnchant(bonus_stats, weaponEnchant, highestWeight);
   const wepEnchantName = weaponEnchant ? weaponEnchant.name : "";
   enchants["CombinedWeapon"] = wepEnchantName;
@@ -1307,7 +1349,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
 
 
   // == Enchants and gems ==
-  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec, userSettings, enchantOverride);
+  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec, userSettings, enchantOverride, builtSet.itemList);
   compileStats(bonus_stats, enchantStats);
   statBreakdown.enchants = enchantStats;
   

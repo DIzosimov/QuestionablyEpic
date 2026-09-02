@@ -228,20 +228,7 @@ export default function GearOptionsSelector(props: any) {
           {select("Gems", pinnedGems, (v) => updateSetting("selectedGems", v), STAT_GEM_OPTIONS,
                   { multiple: true, grid: { xs: 12, sm: 8, md: 6 },
                     helper: "Pick more than one and Top Gear ranks each combination as its own set." })}
-          <Grid item xs={12}>
-            <Tooltip placement="right" title={
-              <Typography variant="caption">
-                Unticked, gems you already have socketed are kept and only empty sockets get filled — so the result
-                is what you'd get without re-gemming. Ticked, every socket uses the gem above.
-              </Typography>
-            }>
-              <FormControlLabel
-                control={<Checkbox size="small" checked={settingValue("replaceExistingGems", true) !== false}
-                                   onChange={(e) => updateSetting("replaceExistingGems", e.target.checked)} />}
-                label={<Typography variant="body2">Replace gems I already have socketed</Typography>}
-              />
-            </Tooltip>
-          </Grid>
+          
         </>
       ))}
 

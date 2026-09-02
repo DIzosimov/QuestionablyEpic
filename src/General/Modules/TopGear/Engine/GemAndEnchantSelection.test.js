@@ -1,7 +1,7 @@
 import Player from "General/Modules/Player/Player";
 import Item from "General/Items/Item";
 import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
-import { runTopGear, runTopGearShard, finishTopGear, TopSets, countGearSets, estimateEvaluations } from "./TopGearEngine";
+import { runTopGear, runTopGearShard, finishTopGear, TopSets, countGearSets, estimateEvaluations, keepsExistingGear, getEnchantSearchSpace as enchantSpace } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
 import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import rootReducer from "Redux/Reducers/RootReducer";
@@ -1421,5 +1421,95 @@ describe("The equipped set is measured wearing the player's own gems", () => {
     });
 
     expect(equippedHPS(player, cfg())).toEqual(0);
+  });
+});
+
+/*
+  "Replace existing gems and enchants" as a top level option.
+
+  It answers "am I willing to re-gem and re-enchant", which is a question about the run rather than about pinning
+  individual choices, so it has to work without opening the detailed gear panel at all. Off, the gear keeps what
+  it already has and Top Gear only decides what's empty.
+*/
+describe("Keeping the gems and enchants the player already has", () => {
+  const { getEnchantByEnchantID } = require("Databases/EnchantDB");
+  const SOCKETED = "240890:240890:240890";  // Deadly Peridot.
+  const WORN_WEAPON = 7983;                 // Berserker's Rage.
+  const WORN_RING = 7969;                   // Zul'jin's Mastery.
+
+  // Deliberately no detailedGearOptions: the point is that this works on a plain run.
+  const plain = (replace) => {
+    const s = JSON.parse(JSON.stringify(base));
+    s.replaceExistingGems = { ...s.replaceExistingGems, value: replace };
+    return s;
+  };
+
+  const geared = () => {
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    GEAR.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      if (item.socket) item.gemString = SOCKETED;
+      if (slot === "2H Weapon") item.enchantID = WORN_WEAPON;
+      if (slot === "Finger") item.enchantID = WORN_RING;
+      player.addActiveItem(item);
+    });
+    return player;
+  };
+
+  const topSet = (settings) => {
+    const p = geared();
+    return runTopGear(p.activeItems, buildNewWepCombos(p, true), p, "Raid", p.getHPS("Raid"),
+                      settings, p.getActiveModel("Raid")).itemSet;
+  };
+
+  test("it reads without the detailed panel being open", () => {
+    expect(keepsExistingGear(plain(false))).toBe(true);
+    expect(keepsExistingGear(plain(true))).toBe(false);
+    // The settings panel writes booleans through as strings.
+    expect(keepsExistingGear({ replaceExistingGems: { value: "false" } })).toBe(true);
+    // An untouched profile replaces, exactly as before this was reachable.
+    expect(keepsExistingGear(base)).toBe(false);
+    expect(keepsExistingGear({})).toBe(false);
+  });
+
+  test("the gems already socketed are kept", () => {
+    const kept = topSet(plain(false)).enchantBreakdown["Gems"];
+    const replaced = topSet(plain(true)).enchantBreakdown["Gems"];
+
+    // Socket 0 is the meta and is chosen separately either way; the stat sockets are what the setting governs.
+    expect(kept.slice(1).every((gem) => gem === 240890)).toBe(true);
+    expect(replaced.slice(1).every((gem) => gem === 240890)).toBe(false);
+  });
+
+  test("the enchants already applied are kept", () => {
+    const kept = topSet(plain(false)).enchantBreakdown;
+
+    expect(kept["CombinedWeapon"]).toEqual(getEnchantByEnchantID(WORN_WEAPON).name);
+    expect(kept["Finger1"]).toEqual(getEnchantByEnchantID(WORN_RING).name);
+  });
+
+  test("replacing picks the engine's own enchant instead", () => {
+    const replaced = topSet(plain(true)).enchantBreakdown;
+
+    // Arcane Mastery is this spec's default, so it should differ from the Berserker's Rage worn above.
+    expect(replaced["CombinedWeapon"]).not.toEqual(getEnchantByEnchantID(WORN_WEAPON).name);
+  });
+
+  test("a slot with nothing on is still decided by the engine", () => {
+    // Head carries no enchantID in this fixture, so keeping has nothing to keep there.
+    const kept = topSet(plain(false)).enchantBreakdown;
+
+    expect(kept["Head"]).toBeTruthy();
+    expect(kept["Head"]).not.toEqual("");
+  });
+
+  test("enchants aren't searched when they're being kept", () => {
+    // Every combination would score the same on the slots being kept, so paying for them is pure waste.
+    const searching = { ...plain(false), optimizeAllGearOptions: { value: true } };
+    expect(enchantSpace(searching, "Preservation Evoker")).toEqual({});
+    expect(Object.keys(enchantSpace({ ...plain(true), optimizeAllGearOptions: { value: true } }, "Preservation Evoker")).length)
+      .toBeGreaterThan(0);
   });
 });
