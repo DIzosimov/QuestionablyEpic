@@ -43,6 +43,9 @@ type ShortReport = {
   contentType: string; // TODO: Replace with contentTypes
   embellishedSelected?: number; // Drives the "only two embellishments can be worn" note in the report.
   equippedHPS?: number; // Throughput of the player's current gear, for the upgrade percentage.
+  // What to spend crests on, in the order to spend it. Absent unless the player asked for it.
+  crestPlan?: { id: number; slot: string; fromLevel: number; toLevel: number; crest: string; crests: number;
+                gain: number; spent: { [currencyID: number]: number } }[];
   itemSet: {
     itemList: any[]; // TODO: Replace with Item
     setStats: any; // TODO: Replace with nice stat object.
@@ -547,6 +550,41 @@ export default function TopGear(props: any) {
     // handleClickDelete();
   };
 
+  /**
+   * What to spend crests on, for the set the run settled on.
+   *
+   * Planned against the player's own Item objects rather than the report's copies: those have been through
+   * postMessage and lost the methods needed to work out what raising them would be worth. They're matched back by
+   * uniqueHash, the same way shortenReport unfolds weapons.
+   *
+   * Only the fields the report draws are kept, so a saved report doesn't carry a copy of every item again.
+   */
+  const planCrests = async (result: TopGearResult, contentType: contentTypes, baseHPS: number) => {
+    const on = playerSettings.crestSpending && (playerSettings.crestSpending.value === true || playerSettings.crestSpending.value === "true");
+    if (!on) return undefined;
+
+    const { planUpgrades } = await import("./Engine/TopGearEngine");
+    const hashes: string[] = [];
+    result.itemSet.itemList.forEach((item: any) => {
+      if (item.slot === "CombinedWeapon" && item.offhandID > 0) hashes.push(item.mainHandUniqueHash, item.offHandUniqueHash);
+      else hashes.push(item.uniqueHash);
+    });
+
+    const items = hashes.map((hash) => props.player.getItemByHash(hash)[0]).filter(Boolean);
+    if (items.length === 0) return undefined;
+
+    const budget = (props.player.upgradeCurrency || {}).currencies || {};
+    const plan = planUpgrades(items, props.player, contentType, baseHPS, playerSettings,
+                              props.player.getActiveModel(contentType), budget);
+
+    return plan.map((purchase: any) => ({
+      id: purchase.item.id, slot: purchase.item.slot,
+      fromLevel: purchase.fromLevel, toLevel: purchase.toLevel,
+      crest: purchase.crest, crests: purchase.crests,
+      gain: Math.round(purchase.gain), spent: purchase.spent,
+    }));
+  };
+
   const shortenReport = (report: TopGearResult, player: Player, itemList: Item[]) => {
     const itemsAdded: String[] = []
     console.log(report);
@@ -685,13 +723,14 @@ export default function TopGear(props: any) {
           const { finishTopGear } = await import("./Engine/TopGearEngine");
           return finishTopGear(shards, props.player, contentType, props.player.getActiveModel(contentType));
         })
-        .then((result: TopGearResult | null) => { // 
+        .then(async (result: TopGearResult | null) => { // 
           if (result) {
             // If top gear completes successfully, log a successful run, terminate the worker and then press on to the Report.
             apiSendTopGearSet(props.player, contentType, result.itemSet.hardScore, result.itemsCompared);
             //props.setTopResult(result);
             const shortResult = shortenReport(result, props.player, itemList);
             if (shortResult) shortResult.new = true; // Check that shortReport didn't return null.
+            if (shortResult) shortResult.crestPlan = await planCrests(result, contentType, baseHPS);
             props.setTopResult(shortResult);
 
             history.push("/report/");

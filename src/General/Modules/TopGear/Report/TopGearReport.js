@@ -35,6 +35,7 @@ import { getWHData } from "./WowheadGearPlannerExport";
 import { trackPageView } from "Analytics";
 import TopGearReportTabs from "./TopGearReportTabs";
 import TopGearFolioEntry from "./TopGearFolioEntry";
+import CrestPlanEntry from "./CrestPlanEntry";
 
 export async function fetchReport(reportCode, setResult, setBackgroundImage, setLoadFailed = () => {}) {
   // A direct visit to /report/, or a refresh after a run, has no code to load: the path splits to an empty string.
@@ -298,6 +299,9 @@ function displayReport(
     }
   });
 
+  // Absent unless the player asked for a plan, and empty when nothing is affordable or everything is capped.
+  const crestPlan = result.crestPlan || [];
+
   // Gem position isn't modelled: the engine picks one multiset for the whole set and the report hands them out in
   // slot order, so which item ends up with which gem is an artefact of that ordering. A gem therefore only counts
   // as a change if the set as a whole gains one - comparing per item flagged two identical gems trading places as
@@ -519,6 +523,8 @@ function displayReport(
                       </Grid>
                     </Grid>
                   </Grid>
+
+                  <CrestPlanEntry plan={crestPlan} language={currentLanguage} gameType={gameType} />
 
                   <Grid item xs={12}>
                     {/* The cards mark what to change; without a key a gold ring is just a mystery. */}
