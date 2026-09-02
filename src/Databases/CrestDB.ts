@@ -40,6 +40,12 @@ export type UpgradeCost = {
 /** Every rank costs the same, so the table below is derived rather than typed out. */
 export const CRESTS_PER_UPGRADE = 20;
 
+// Crafted gear doesn't climb a ladder. It's made at a base level for no crests at all, and one payment lifts it to
+// its track's ceiling: Hero crests for a Runed piece, Myth crests for a Gilded one.
+export const CRAFTED_BASE_LEVEL = 305;
+export const CRAFTED_UPGRADE_CRESTS = 80;
+const CRAFTED_TRACKS: { [track: string]: string } = { "Runed Crafted": "Hero", "Gilded Crafted": "Myth" };
+
 /**
  * The ranks of each upgrade track, cheapest first.
  *
@@ -47,9 +53,7 @@ export const CRESTS_PER_UPGRADE = 20;
  * track is paid for with the crest of its own name. That leaves nothing to keep in step by hand except the ladder
  * and the caps, which the app already had.
  *
- * The crafted tracks are absent. They cap out like any other but there is no crest named after them, and which
- * crest pays for a crafted upgrade isn't something the app can work out - so crafted items simply don't appear in
- * a spending plan rather than being priced with a guess.
+ * The crafted tracks are the exception: one payment from the base level to the ceiling, rather than a ladder.
  */
 export const UPGRADE_COSTS: { [track: string]: UpgradeCost[] } = Object.keys(CONSTANTS.itemLevelCaps)
   .filter((track) => Object.values(CREST_CURRENCIES).includes(track))
@@ -63,7 +67,15 @@ export const UPGRADE_COSTS: { [track: string]: UpgradeCost[] } = Object.keys(CON
       crests: CRESTS_PER_UPGRADE,
     }));
     return tracks;
-  }, {});
+  }, Object.entries(CRAFTED_TRACKS).reduce((tracks: { [track: string]: UpgradeCost[] }, [track, crest]) => {
+    tracks[track] = [{
+      fromLevel: CRAFTED_BASE_LEVEL,
+      toLevel: CONSTANTS.itemLevelCaps[track],
+      crest,
+      crests: CRAFTED_UPGRADE_CRESTS,
+    }];
+    return tracks;
+  }, {}));
 
 /** Whether we know enough to price upgrades at all. */
 export const hasCrestData = (): boolean =>

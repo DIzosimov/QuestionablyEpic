@@ -113,11 +113,14 @@ describe("Working out what to spend crests on", () => {
   the same, and a track is paid for with the crest of its own name.
 */
 describe("What an upgrade really costs", () => {
-  const { UPGRADE_COSTS, CRESTS_PER_UPGRADE, hasCrestData, remainingUpgrades } = jest.requireActual("Databases/CrestDB");
+  const { UPGRADE_COSTS, CRESTS_PER_UPGRADE, CRAFTED_BASE_LEVEL, hasCrestData, remainingUpgrades,
+          CREST_CURRENCIES: CREST_TIERS } = jest.requireActual("Databases/CrestDB");
   const { CONSTANTS } = require("General/Engine/CONSTANTS");
 
+  const ladderTracks = () => Object.entries(UPGRADE_COSTS).filter(([track]) => !track.includes("Crafted"));
+
   test("every rank costs the same, in the crest named after its track", () => {
-    Object.entries(UPGRADE_COSTS).forEach(([track, ranks]) => {
+    ladderTracks().forEach(([track, ranks]) => {
       ranks.forEach((rank) => {
         expect(rank.crests).toEqual(CRESTS_PER_UPGRADE);
         expect(rank.crest).toEqual(track);
@@ -126,7 +129,7 @@ describe("What an upgrade really costs", () => {
   });
 
   test("a rank is one step up the ladder, and stops at the track's cap", () => {
-    Object.entries(UPGRADE_COSTS).forEach(([track, ranks]) => {
+    ladderTracks().forEach(([track, ranks]) => {
       ranks.forEach((rank) => {
         const ladder = CONSTANTS.fullItemLevels;
         expect(ladder[ladder.indexOf(rank.fromLevel) + 1]).toEqual(rank.toLevel);
@@ -135,11 +138,26 @@ describe("What an upgrade really costs", () => {
     });
   });
 
-  test("the crafted tracks are left unpriced rather than guessed at", () => {
-    // They cap out like any other track, but no crest is named after them.
-    expect(UPGRADE_COSTS["Runed Crafted"]).toBeUndefined();
-    expect(UPGRADE_COSTS["Gilded Crafted"]).toBeUndefined();
-    expect(CONSTANTS.itemLevelCaps["Runed Crafted"]).toBeTruthy();
+  test("crafted gear is one payment to its ceiling, not a ladder", () => {
+    const { CRAFTED_BASE_LEVEL, CRAFTED_UPGRADE_CRESTS } = jest.requireActual("Databases/CrestDB");
+
+    expect(UPGRADE_COSTS["Runed Crafted"]).toEqual([
+      { fromLevel: CRAFTED_BASE_LEVEL, toLevel: 318, crest: "Hero", crests: CRAFTED_UPGRADE_CRESTS },
+    ]);
+    expect(UPGRADE_COSTS["Gilded Crafted"]).toEqual([
+      { fromLevel: CRAFTED_BASE_LEVEL, toLevel: 331, crest: "Myth", crests: CRAFTED_UPGRADE_CRESTS },
+    ]);
+  });
+
+  test("a crafted track is paid for in a crest that isn't its own name", () => {
+    // Every other track spends the crest named after it; these two don't, which is why they're written out.
+    expect(UPGRADE_COSTS["Runed Crafted"][0].crest).not.toEqual("Runed Crafted");
+    expect(Object.values(CREST_TIERS)).toContain(UPGRADE_COSTS["Gilded Crafted"][0].crest);
+  });
+
+  test("a crafted piece already at its ceiling has nothing to buy", () => {
+    expect(remainingUpgrades("Gilded Crafted", 331)).toEqual([]);
+    expect(remainingUpgrades("Gilded Crafted", CRAFTED_BASE_LEVEL)).toHaveLength(1);
   });
 
   test("an item at its track's cap has nothing left to buy", () => {
