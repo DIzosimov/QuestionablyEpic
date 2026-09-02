@@ -320,6 +320,9 @@ export class Player {
     
   };
 
+  // The Omnium Folio runes the character has selected, by slot, from the SimC import. Empty when we can't tell.
+  folioRunes = {};
+
   embellishItem = (item, embellishmentName) => {
 
     const newItem = item.clone();

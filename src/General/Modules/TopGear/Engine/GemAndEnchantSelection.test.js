@@ -1,7 +1,7 @@
 import Player from "General/Modules/Player/Player";
 import Item from "General/Items/Item";
 import { buildNewWepCombos, getGearOption, isDetailedGearOptions } from "General/Engine/ItemUtilities";
-import { runTopGear, runTopGearShard, finishTopGear, TopSets, countGearSets, estimateEvaluations, keepsExistingGear, getEnchantSearchSpace as enchantSpace } from "./TopGearEngine";
+import { runTopGear, runTopGearShard, finishTopGear, TopSets, countGearSets, estimateEvaluations, getEnchantSearchSpace as enchantSpace } from "./TopGearEngine";
 import { getEnchantById, getEnchantsForSlot } from "Databases/EnchantDB";
 import { getFolioGems, getFolioChoices, countFolioCombinations, buildFolioCombinations, FOLIO_SLOT_SETTINGS, FOLIO_STAT_SLOT } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import rootReducer from "Redux/Reducers/RootReducer";
@@ -1433,6 +1433,7 @@ describe("The equipped set is measured wearing the player's own gems", () => {
 */
 describe("Keeping the gems and enchants the player already has", () => {
   const { getEnchantByEnchantID } = require("Databases/EnchantDB");
+  const { keepsExistingGear } = require("General/Engine/ItemUtilities");
   const SOCKETED = "240890:240890:240890";  // Deadly Peridot.
   const WORN_WEAPON = 7983;                 // Berserker's Rage.
   const WORN_RING = 7969;                   // Zul'jin's Mastery.

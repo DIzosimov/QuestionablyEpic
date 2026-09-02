@@ -1500,3 +1500,17 @@ export const craftedStatLabel = (item: any): string => {
   const titled = stats.map((stat: string) => stat.charAt(0).toUpperCase() + stat.slice(1));
   return titled.join(" / ");
 };
+
+/**
+ * Whether the player wants to keep the gems, enchants and runes they already have.
+ *
+ * Read straight from the settings rather than through getGearOption: it's a top level Top Gear option, not one of
+ * the detailed gear panel's, so it has to work on a plain run. The key still says gems because renaming it would
+ * quietly reset the choice on every saved profile.
+ */
+export function keepsExistingGear(userSettings: any): boolean {
+  const setting = userSettings ? userSettings.replaceExistingGems : undefined;
+  const value = setting && typeof setting === "object" ? setting.value : setting;
+  return value === false || value === "false";
+}
+

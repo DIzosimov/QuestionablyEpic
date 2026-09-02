@@ -7,7 +7,7 @@ import Player from "../../Player/Player";
 import CastModel from "../../Player/CastModel";
 import { getEffectValue } from "../../../../Retail/Engine/EffectFormulas/EffectEngine";
 import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished, getGearOption,
-         buildChoiceCombinations, countChoiceCombinations, pinnedSlots, isOptimizeAllGear } from "General/Engine/ItemUtilities";
+         buildChoiceCombinations, countChoiceCombinations, pinnedSlots, isOptimizeAllGear, keepsExistingGear } from "General/Engine/ItemUtilities";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTrinketValue } from "Retail/Engine/EffectFormulas/Generic/Trinkets/TrinketEffectFormulas";
 import { allRamps, allRampsHealing, getDefaultDiscTalents } from "General/Modules/Player/ClassDefaults/DisciplinePriest/DiscRampUtilities";
@@ -52,6 +52,8 @@ function setupPlayer(player: Player, contentType: contentTypes, castModel: any) 
   //newPlayer.castModel[contentType] = Object.assign(newPlayer.castModel[contentType], castModel);
 
   newPlayer.activeModelID = player.activeModelID;
+  // Carried across the worker boundary, where the player arrives as plain data rather than a Player.
+  newPlayer.folioRunes = player.folioRunes || {};
 
   return newPlayer;
 }
@@ -301,19 +303,6 @@ export function countGemLoadouts(gemCount: number, sockets: number): number {
 // real cost of a run from the same numbers the engine will use.
 
 /** The gems a run will try in each stat socket. */
-/**
- * Whether the player wants to keep the gems, enchants and runes they already have.
- *
- * Read straight from the settings rather than through getGearOption: it's a top level Top Gear option, not one of
- * the detailed gear panel's, so it has to work on a plain run. The key still says gems because renaming it would
- * quietly reset the choice on every saved profile.
- */
-export function keepsExistingGear(userSettings: any): boolean {
-  const setting = userSettings ? userSettings.replaceExistingGems : undefined;
-  const value = setting && typeof setting === "object" ? setting.value : setting;
-  return value === false || value === "false";
-}
-
 export function getGemSearchSpace(userSettings: any): number[] {
   if (isOptimizeAllGear(userSettings)) return getCurrentStatGems().map((gem) => gem.id);
   const pinned = getGearOption(userSettings, "selectedGems", []);
@@ -1495,14 +1484,17 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   // Omnium Folio. Slots 1, 4 and 5 are selectable; anything left on Automatic resolves to the rune the engine
   // used to hardcode, so an untouched profile produces an identical set. When several runes are pinned for a slot
   // the run is expanded into variants and each one arrives here as a folioOverride.
-  const folioGems = getFolioGems(userSettings, getHighestWeight(castModel), folioOverride);
+  const folioGems = getFolioGems(userSettings, getHighestWeight(castModel), folioOverride, player.folioRunes);
 
 
   const folioStats = getFolioEffect(folioGems, {player: player, contentType: contentType, settings: userSettings, setStats: setStats, castModel: castModel, setVariables: setVariables});
   builtSet.folioGems = folioGems;
   // The runes the player would have had without touching anything. SimC doesn't report the Folio, so this is the
   // only "before" there is - the report marks the slots that differ from it and leaves the rest unmarked.
-  builtSet.folioAuto = getFolioGems({}, getHighestWeight(castModel));
+  // The "before" the report diffs against: the runes the character actually has where we can read them, and the
+  // automatic pick for the slots we can't.
+  builtSet.folioAuto = getFolioGems({}, getHighestWeight(castModel), undefined, player.folioRunes)
+    .map((auto: number, slot: number) => (player.folioRunes || {})[slot + 1] || auto);
   effectStats.push(folioStats);
 
   // Special 10.0.7 Ring

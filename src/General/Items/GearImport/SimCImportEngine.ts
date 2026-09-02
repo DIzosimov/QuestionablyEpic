@@ -1,4 +1,5 @@
 import { bonus_IDs } from "../../../Retail/Engine/BonusIDs";
+import { parseOmniumTalents } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import { curveDB } from "../../../Retail/Engine/ItemCurves";
 import { compileStats, checkDefaultSocket, calcStatsAtLevel, getItemProp, getItem, getItemAllocations, scoreItem, correctCasing, getValidWeaponTypes, getValidArmorTypes, getValidWeaponTypesBySpec } from "../../Engine/ItemUtilities";
 import Item from "../Item";
@@ -299,6 +300,10 @@ export function runSimC(simCInput: string, player: Player, contentType: contentT
 }
 
 export function processAllLines(player: Player, contentType: contentTypes, lines: string[], linkedItems: number, vaultItems: number, playerSettings: PlayerSettings, autoUpgradeVault: boolean, autoUpgradeAll: boolean) {
+  // The Omnium Folio is a character line rather than an item, so it's read here rather than in processItem.
+  const folioLine = lines.find((line) => line.trim().startsWith("omnium_talents="));
+  if (folioLine) player.folioRunes = parseOmniumTalents(folioLine.trim());
+
   for (var i = 8; i < lines.length; i++) {
     let line = lines[i];
     let type = i > vaultItems && i < linkedItems ? "Vault" : "Regular";

@@ -1,7 +1,7 @@
 import { convertPPMToUptime, processedValue, runGenericPPMTrinket, 
     getHighestStat, getLowestStat, runGenericOnUseTrinket, getDiminishedValue, runDiscOnUseTrinket, runGenericFlatProc } from "Retail/Engine/EffectFormulas/EffectUtilities";
     
-import { compileStats, getEstimatedHPS, getGearOption, buildChoiceCombinations, countChoiceCombinations, isOptimizeAllGear } from "General/Engine/ItemUtilities"
+import { compileStats, getEstimatedHPS, getGearOption, buildChoiceCombinations, countChoiceCombinations, isOptimizeAllGear, keepsExistingGear } from "General/Engine/ItemUtilities"
 
 import Player from "General/Modules/Player/Player";
 
@@ -59,6 +59,38 @@ const FOLIO_STAT_RUNES: { [stat: string]: number } = {
   versatility: 1279613,
 };
 
+/**
+ * The Folio runes a character has selected, as SimC reports them.
+ *
+ * SimC writes the Folio as `omnium_talents=<entry>:<rank>/...`, where the entry ids are a different numbering to
+ * the rune spell ids everything else uses. Only entries listed here can be recognised; anything else is ignored
+ * and that slot falls back to the automatic pick, so an unknown entry costs nothing but the knowledge.
+ *
+ * Slot 4 is the only slot whose rune varies - the rest are fixed - so it's the only one worth mapping. Confirming
+ * or extending this is one export: change the rune in game, re-export, and see which number moved.
+ */
+const OMNIUM_TALENT_RUNES: { [entryID: number]: number } = {
+  136819: 1279609, // Rune of Critical Power
+};
+
+/** The rune ids a character has selected, by slot. Slots we can't identify are simply absent. */
+export const parseOmniumTalents = (line: string): { [slot: number]: number } => {
+  const worn: { [slot: number]: number } = {};
+  const body = (line || "").split("=")[1];
+  if (!body) return worn;
+
+  body.split("/").forEach((entry) => {
+    const entryID = parseInt(entry.split(":")[0], 10);
+    const runeID = OMNIUM_TALENT_RUNES[entryID];
+    if (!runeID) return;
+
+    const rune = omniumFolioData.find((gem) => gem.id === runeID);
+    if (rune) worn[rune.slot] = runeID;
+  });
+
+  return worn;
+};
+
 export const getFolioOptions = (slot: number): string[] => {
   return omniumFolioData.filter((gem) => gem.slot === slot).map((gem) => gem.shortName);
 };
@@ -106,10 +138,18 @@ export const buildFolioCombinations = (settings: any, cap: number = Infinity): a
  * @param bestStat The player's highest weighted secondary, used for the Automatic slot 4 pick.
  * @param folioOverride One combination from buildFolioCombinations, when the run has been expanded into variants.
  */
-export const getFolioGems = (settings: any, bestStat: string, folioOverride?: any): number[] => {
+export const getFolioGems = (settings: any, bestStat: string, folioOverride?: any,
+                             wornRunes: { [slot: number]: number } = {}): number[] => {
   const chosen: number[] = [];
 
   [1, 2, 3, 4, 5].forEach((slot) => {
+    // A rune the character already has beats the engine's pick when they've asked to keep what they have, the
+    // same way their gems and enchants do.
+    if (keepsExistingGear(settings) && wornRunes[slot]) {
+      chosen.push(wornRunes[slot]);
+      return;
+    }
+
     const override = folioOverride ? folioOverride[slot] : undefined;
     const choices = getFolioChoices(settings, slot);
     // A variant names one rune per slot. Failing that a single pinned rune is used directly - but several pinned
