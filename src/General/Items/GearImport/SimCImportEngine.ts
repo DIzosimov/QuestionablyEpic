@@ -1,7 +1,7 @@
 import { bonus_IDs } from "../../../Retail/Engine/BonusIDs";
 import { parseOmniumTalents } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import { curveDB } from "../../../Retail/Engine/ItemCurves";
-import { compileStats, checkDefaultSocket, calcStatsAtLevel, getItemProp, getItem, getItemAllocations, scoreItem, correctCasing, getValidWeaponTypes, getValidArmorTypes, getValidWeaponTypesBySpec } from "../../Engine/ItemUtilities";
+import { compileStats, checkDefaultSocket, calcStatsAtLevel, getItemProp, getItem, getItemAllocations, scoreItem, correctCasing, getValidWeaponTypes, getValidArmorTypes, getValidWeaponTypesBySpec, parseUpgradeCurrencies } from "../../Engine/ItemUtilities";
 import Item from "../Item";
 import Player from "General/Modules/Player/Player";
 import { CONSTANTS } from "General/Engine/CONSTANTS";
@@ -303,6 +303,10 @@ export function processAllLines(player: Player, contentType: contentTypes, lines
   // The Omnium Folio is a character line rather than an item, so it's read here rather than in processItem.
   const folioLine = lines.find((line) => line.trim().startsWith("omnium_talents="));
   if (folioLine) player.folioRunes = parseOmniumTalents(folioLine.trim());
+
+  // Crests and Valorstones, for working out what a character can actually afford to upgrade.
+  const currencyLine = lines.find((line) => line.replace(/^#\s*/, "").startsWith("upgrade_currencies="));
+  if (currencyLine) player.upgradeCurrency = parseUpgradeCurrencies(currencyLine);
 
   for (var i = 8; i < lines.length; i++) {
     let line = lines[i];

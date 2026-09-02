@@ -1514,3 +1514,34 @@ export function keepsExistingGear(userSettings: any): boolean {
   return value === false || value === "false";
 }
 
+
+/* ------------------------------------- Upgrade currencies -------------------------------------- */
+
+/**
+ * The crests and Valorstones a character holds, keyed by currency id.
+ *
+ * SimC reports them on a commented line: `# upgrade_currencies=c:<id>:<amount>/.../i:<itemID>:<count>`. The `c:`
+ * entries are currencies and the `i:` entries are items, which are counted separately since they aren't spent on
+ * upgrades the same way.
+ *
+ * The ids are returned as they appear. Naming them - which id is which crest tier - is game data the app doesn't
+ * carry yet, and guessing would attribute a character's crests to the wrong tier.
+ */
+export function parseUpgradeCurrencies(line: string): { currencies: { [id: number]: number }; items: { [id: number]: number } } {
+  const held: { currencies: { [id: number]: number }; items: { [id: number]: number } } = { currencies: {}, items: {} };
+  // The line is a comment in the export, so the leading hash and spacing come off first.
+  const body = (line || "").replace(/^#\s*/, "").split("=")[1];
+  if (!body) return held;
+
+  body.split("/").forEach((entry) => {
+    const [kind, id, amount] = entry.split(":");
+    const held_id = parseInt(id, 10);
+    const held_amount = parseInt(amount, 10);
+    if (!held_id || isNaN(held_amount)) return;
+
+    if (kind === "c") held.currencies[held_id] = held_amount;
+    else if (kind === "i") held.items[held_id] = held_amount;
+  });
+
+  return held;
+}
