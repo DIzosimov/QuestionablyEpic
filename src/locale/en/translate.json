@@ -528,8 +528,8 @@
           "tooltip": "Search every gem, enchant and Omnium Folio rune instead of picking them yourself. Slow: the number of combinations multiplies, so set the search depth in the gear panel to match."
         },
         "replaceExistingGems": {
-          "title": "Replace Existing Gems & Enchants",
-          "tooltip": "On, Top Gear assumes you'll re-gem and re-enchant freely. Off, it keeps what your gear already has and only fills empty sockets and unenchanted slots."
+          "title": "Replace Gems & Enchants",
+          "tooltip": "On, Top Gear assumes you'll re-gem, re-enchant and re-rune freely. Off, it keeps the gems, enchants and Omnium Folio runes your character already has, and only decides what's empty."
         }
       },
       "SettingsTitle": "Optional Settings"

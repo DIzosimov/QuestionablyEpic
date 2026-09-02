@@ -8,7 +8,7 @@ import SettingsComponent from "./SettingsComponent";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "Redux/Reducers/RootReducer";
 import { togglePlayerSettings } from "Redux/Actions";
-import { isOptimizeAllGear } from "General/Engine/ItemUtilities";
+import { isOptimizeAllGear, keepsExistingGear } from "General/Engine/ItemUtilities";
 
 const useStyles = makeStyles((theme: any) => ({
   root: {
@@ -50,19 +50,32 @@ export default function Settings(props : any) {
   const setOptimizeAll = (on: boolean) =>
     dispatch(togglePlayerSettings({ ...playerSettings, optimizeAllGearOptions: { ...playerSettings.optimizeAllGearOptions, value: on } }));
 
-  const optimizeSwitch = (
-    <Tooltip placement="top" title={<Typography variant="caption">{t("Settings.Retail.optimizeAllGearOptions.tooltip")}</Typography>}>
+  // Whether Top Gear may re-gem, re-enchant and re-rune, or has to work with what the character already has. Same
+  // reasoning as above for living on the header: it changes what a whole run means, so it shouldn't be buried.
+  const replaceExisting = !keepsExistingGear(playerSettings);
+  const setReplaceExisting = (on: boolean) =>
+    dispatch(togglePlayerSettings({ ...playerSettings, replaceExistingGems: { ...playerSettings.replaceExistingGems, value: on } }));
+
+  // The switch sits inside the accordion header, so its clicks mustn't also expand the panel beneath it.
+  const headerSwitch = (setting: string, on: boolean, onChange: (on: boolean) => void) => (
+    <Tooltip key={setting} placement="top" title={<Typography variant="caption">{t("Settings.Retail." + setting + ".tooltip")}</Typography>}>
       <FormControlLabel
-        style={{ marginLeft: "auto", marginRight: 8 }}
-        // The switch sits inside the accordion header, so its clicks mustn't also expand the panel beneath it.
+        style={{ marginRight: 8 }}
         onClick={(e) => e.stopPropagation()}
         onFocus={(e) => e.stopPropagation()}
-        control={<Switch size="small" checked={optimizeAll} onChange={(e) => setOptimizeAll(e.target.checked)} />}
-        label={<Typography variant="body2" color={optimizeAll ? "primary" : "textSecondary"}>
-          {t("Settings.Retail.optimizeAllGearOptions.title")}
+        control={<Switch size="small" checked={on} onChange={(e) => onChange(e.target.checked)} />}
+        label={<Typography variant="body2" color={on ? "primary" : "textSecondary"}>
+          {t("Settings.Retail." + setting + ".title")}
         </Typography>}
       />
     </Tooltip>
+  );
+
+  const runSwitches = (
+    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center" }}>
+      {headerSwitch("replaceExistingGems", replaceExisting, setReplaceExisting)}
+      {headerSwitch("optimizeAllGearOptions", optimizeAll, setOptimizeAll)}
+    </div>
   );
 
   return (
@@ -73,7 +86,7 @@ export default function Settings(props : any) {
             <SettingsIcon style={{ marginRight: 4, width: 22, height: 22 }} />
             <Typography className={classes.heading}>{t("Settings.SettingsTitle")}</Typography>
           </div>
-          {props.optimizeToggle && gameType === "Retail" ? optimizeSwitch : null}
+          {props.optimizeToggle && gameType === "Retail" ? runSwitches : null}
         </AccordionSummary>
         <AccordionDetails className={classes.details}>
           {/* ---- If gameType = "Retail" show Retail Settings, otherwise show Burning Crusade Settings ---- */}

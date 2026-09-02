@@ -58,7 +58,7 @@ describe("Every setting is labelled", () => {
   test("settings rendered outside the panel keep their strings too", () => {
     // These are marked hidden, so the check below skips them - but they're still drawn with a translated label
     // somewhere, and losing the string would render the raw key at the user.
-    ["optimizeAllGearOptions"].forEach((key) => {
+    ["optimizeAllGearOptions", "replaceExistingGems"].forEach((key) => {
       expect(retailStrings[key]).toBeTruthy();
       expect(retailStrings[key].title).toBeTruthy();
       expect(retailStrings[key].tooltip).toBeTruthy();
