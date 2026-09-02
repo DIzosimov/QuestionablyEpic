@@ -66,11 +66,15 @@ const FOLIO_STAT_RUNES: { [stat: string]: number } = {
  * the rune spell ids everything else uses. Only entries listed here can be recognised; anything else is ignored
  * and that slot falls back to the automatic pick, so an unknown entry costs nothing but the knowledge.
  *
- * Slot 4 is the only slot whose rune varies - the rest are fixed - so it's the only one worth mapping. Confirming
- * or extending this is one export: change the rune in game, re-export, and see which number moved.
+ * Slot 4 is the only slot whose rune varies - the rest are fixed - so it's the only one worth mapping. All four
+ * were confirmed by exporting the same character once per rune: only the second entry ever moved, and the other
+ * four (136814, 136817, 136819, 136822) stayed put across all of them.
  */
 const OMNIUM_TALENT_RUNES: { [entryID: number]: number } = {
-  136819: 1279609, // Rune of Critical Power
+  136815: 1279609, // Rune of Critical Power
+  136821: 1279610, // Rune of Burning Haste
+  136818: 1279612, // Rune of Masterful Cunning
+  136820: 1279613, // Rune of the Versatile Warrior
 };
 
 /** The rune ids a character has selected, by slot. Slots we can't identify are simply absent. */

@@ -11,17 +11,33 @@ import rootReducer from "Redux/Reducers/RootReducer";
   Anything else is ignored so the slot falls back to automatic, which is what happened before any of this.
 */
 describe("Reading the Folio from a SimC export", () => {
-  const CRIT_RUNE = 1279609;
-  // A real line, from the export that prompted this.
-  const LINE = "omnium_talents=136814:1/136815:1/136817:1/136819:1/136822:1";
+  // The same character exported once per rune. Only the second entry ever moved, which is what identifies it as
+  // the stat slot - the other four stayed put across all four exports.
+  const EXPORTS = {
+    crit: { line: "omnium_talents=136814:1/136815:1/136817:1/136819:1/136822:1", rune: 1279609 },
+    haste: { line: "omnium_talents=136814:1/136821:1/136817:1/136819:1/136822:1", rune: 1279610 },
+    mastery: { line: "omnium_talents=136814:1/136818:1/136817:1/136819:1/136822:1", rune: 1279612 },
+    versatility: { line: "omnium_talents=136814:1/136820:1/136817:1/136819:1/136822:1", rune: 1279613 },
+  };
+  const CRIT_RUNE = EXPORTS.crit.rune;
+  const LINE = EXPORTS.crit.line;
 
   const settings = (replace) => {
     const s = rootReducer(undefined, { type: "@@INIT" }).playerSettings;
     return { ...s, replaceExistingGems: { ...s.replaceExistingGems, value: replace } };
   };
 
-  test("the rune we can identify is read into its slot", () => {
-    expect(parseOmniumTalents(LINE)).toEqual({ [FOLIO_STAT_SLOT]: CRIT_RUNE });
+  test("every stat rune is read from a real export", () => {
+    Object.values(EXPORTS).forEach(({ line, rune }) => {
+      expect(parseOmniumTalents(line)).toEqual({ [FOLIO_STAT_SLOT]: rune });
+    });
+  });
+
+  test("the entries that never moved aren't mistaken for the stat rune", () => {
+    // 136814, 136817, 136819 and 136822 were identical across all four exports, so none of them is the choice.
+    [136814, 136817, 136819, 136822].forEach((fixed) => {
+      expect(parseOmniumTalents("omnium_talents=" + fixed + ":1")).toEqual({});
+    });
   });
 
   test("entries we can't identify are ignored rather than guessed at", () => {
