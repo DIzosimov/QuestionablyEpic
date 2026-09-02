@@ -63,13 +63,16 @@ const pay = (step: UpgradeStep, budget: CrestBudget): CrestBudget => ({
 /**
  * Works out what to spend, in the order to spend it.
  *
- * `gainOf` is asked what one step is worth, which keeps the arithmetic here independent of how healing is scored -
- * the planner never evaluates a set itself.
+ * `gainOf` is asked what one step is worth on top of everything bought so far, which keeps the arithmetic here
+ * independent of how healing is scored - the planner never evaluates a set itself. Passing the purchases along
+ * matters because gear diminishes: the second upgrade of a stat is worth less than the first, so asking what each
+ * step is worth against the original gear would keep overvaluing later ones.
  *
  * Ranks are sequential, so only the next unbought rank of each item is ever a candidate: an item can't jump to its
  * third rank without buying its second.
  */
-export function planCrestSpending(items: any[], budget: CrestBudget, gainOf: (step: UpgradeStep) => number): PlannedPurchase[] {
+export function planCrestSpending(items: any[], budget: CrestBudget,
+                                  gainOf: (step: UpgradeStep, bought: UpgradeStep[]) => number): PlannedPurchase[] {
   if (!hasCrestData()) return [];
 
   // The remaining ranks of each item, in order. Taking a step shifts that item's queue forward.
@@ -85,7 +88,7 @@ export function planCrestSpending(items: any[], budget: CrestBudget, gainOf: (st
       const step = queue[0];
       if (!step || !canAfford(step, remaining)) return;
 
-      const gain = gainOf(step);
+      const gain = gainOf(step, plan);
       // An upgrade that gains nothing is not worth a crest, however cheap it is.
       if (gain <= 0) return;
 

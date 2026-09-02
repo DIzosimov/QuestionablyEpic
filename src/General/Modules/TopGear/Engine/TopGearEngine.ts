@@ -1,3 +1,4 @@
+import { planCrestSpending, UpgradeStep, PlannedPurchase, CrestBudget } from "./CrestSpending";
 import ItemSet from "../ItemSet";
 import TopGearResult from "./TopGearResult";
 import { STATCONVERSION } from "../../../Engine/STAT";
@@ -686,6 +687,53 @@ export function finishTopGear(shards: TopGearShardResult[], player: Player, cont
     result.id = generateReportCode();
     return result;
   }
+}
+
+/**
+ * What to spend crests on, for a set the player is actually wearing or aiming at.
+ *
+ * The healing an upgrade is worth is measured by re-scoring the set with that one item raised, through the same
+ * evalSet everything else goes through, so a rank is valued on what it does for this set rather than on its raw
+ * stat gain. Purchases already planned are applied first: gear diminishes, so a second point of a stat is worth
+ * less than the first and valuing every step against the original gear would keep overvaluing later ones.
+ *
+ * Scores are cached by the levels the set is wearing, since the greedy search asks about the same combination
+ * repeatedly as it works down the list.
+ */
+export function planUpgrades(items: Item[], player: Player, contentType: contentTypes, baseHPS: number,
+                             userSettings: any, castModel: any, budget: CrestBudget): PlannedPurchase[] {
+  const newPlayer = setupPlayer(player, contentType, castModel);
+  const scores: { [levels: string]: number } = {};
+
+  const scoreAt = (levels: number[]): number => {
+    const key = levels.join("/");
+    if (key in scores) return scores[key];
+
+    // A copy per item, so the player's own gear is never altered by working out what upgrading it would be worth.
+    const raised = items.map((item: any, i: number) => {
+      if (item.level === levels[i]) return item;
+      const copy = item.clone();
+      copy.updateLevel(levels[i], item.missiveStats);
+      return copy;
+    });
+
+    const scored = evalSet(new ItemSet(-1, raised, 0, player.spec), newPlayer, contentType, baseHPS, userSettings,
+                           castModel, false, 0, undefined, undefined, undefined, undefined, true);
+    scores[key] = scored.setHPS || scored.hardScore || 0;
+    return scores[key];
+  };
+
+  // The levels the set would be wearing once everything planned so far is bought.
+  const levelsAfter = (bought: UpgradeStep[]): number[] =>
+    items.map((item) => bought.filter((step) => step.item === item).reduce((level, step) => Math.max(level, step.toLevel), item.level));
+
+  const gainOf = (step: UpgradeStep, bought: UpgradeStep[]): number => {
+    const before = levelsAfter(bought);
+    const after = before.map((level, i) => (items[i] === step.item ? step.toLevel : level));
+    return scoreAt(after) - scoreAt(before);
+  };
+
+  return planCrestSpending(items, budget, gainOf);
 }
 
 /**

@@ -673,10 +673,10 @@ export function processItem(line: string, player: Player, contentType: contentTy
       //craftedStats = [];
     }
     if (bonus_id === "12053") {
-      protoItem.upgradeTrack = "Gilded Crafted";
+      protoItem.upgradeTrack = "Myth Crafted";
     }
     else if (bonus_id === "12052") {
-      protoItem.upgradeTrack = "Runed Crafted";
+      protoItem.upgradeTrack = "Hero Crafted";
     }
     if (bonus_id === "8960") protoItem.uniqueTag = "embellishment";
   }

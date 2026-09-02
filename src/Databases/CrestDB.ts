@@ -44,7 +44,12 @@ export const CRESTS_PER_UPGRADE = 20;
 // its track's ceiling: Hero crests for a Runed piece, Myth crests for a Gilded one.
 export const CRAFTED_BASE_LEVEL = 305;
 export const CRAFTED_UPGRADE_CRESTS = 80;
-const CRAFTED_TRACKS: { [track: string]: string } = { "Runed Crafted": "Hero", "Gilded Crafted": "Myth" };
+// Named for the crest that pays for them. The Runed / Gilded names are the previous expansion's, kept so gear
+// saved under them is still priced rather than silently dropping out of a plan.
+const CRAFTED_TRACKS: { [track: string]: string } = {
+  "Hero Crafted": "Hero", "Myth Crafted": "Myth",
+  "Runed Crafted": "Hero", "Gilded Crafted": "Myth",
+};
 
 /**
  * The ranks of each upgrade track, cheapest first.
