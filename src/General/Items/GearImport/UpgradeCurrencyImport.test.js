@@ -55,3 +55,46 @@ describe("Reading upgrade currencies from a SimC export", () => {
     expect(parseUpgradeCurrencies("# upgrade_currencies=c:3442:0").currencies).toEqual({ 3442: 0 });
   });
 });
+
+/*
+  Which currency id is which crest tier. Confirmed against a character's in-game totals, not inferred: all five
+  amounts were distinct, so each id had exactly one tier it could be.
+*/
+describe("Naming the crest tiers", () => {
+  const { CREST_CURRENCIES, crestCurrency, VALORSTONE_CURRENCY } = require("Databases/CrestDB");
+  const { parseUpgradeCurrencies } = require("General/Engine/ItemUtilities");
+
+  // The export, and what the character reported holding at the same moment.
+  const LINE = "# upgrade_currencies=c:1792:15000/c:3442:338/c:3445:25/c:3443:500/c:3444:100/c:3446:84/i:274476:2/i:232875:6";
+  const HELD = { Adventurer: 338, Veteran: 500, Champion: 100, Hero: 25, Myth: 84 };
+
+  test("each tier's currency holds the amount the character reported", () => {
+    const currencies = parseUpgradeCurrencies(LINE).currencies;
+
+    Object.entries(HELD).forEach(([crest, amount]) => {
+      expect(currencies[crestCurrency(crest)]).toEqual(amount);
+    });
+  });
+
+  test("the amounts were distinct, which is what makes the mapping unambiguous", () => {
+    const amounts = Object.values(HELD);
+    expect(new Set(amounts).size).toEqual(amounts.length);
+  });
+
+  test("every tier is named, and none twice", () => {
+    const names = Object.values(CREST_CURRENCIES);
+    expect(names.sort()).toEqual(["Adventurer", "Champion", "Hero", "Myth", "Veteran"]);
+    expect(new Set(names).size).toEqual(names.length);
+  });
+
+  test("the tier names are the upgrade track names, so a track can be priced", () => {
+    const { CONSTANTS } = require("General/Engine/CONSTANTS");
+    Object.values(CREST_CURRENCIES).forEach((crest) => {
+      expect(Object.keys(CONSTANTS.itemLevelCaps)).toContain(crest);
+    });
+  });
+
+  test("Valorstones aren't mistaken for a crest", () => {
+    expect(CREST_CURRENCIES[VALORSTONE_CURRENCY]).toBeUndefined();
+  });
+});

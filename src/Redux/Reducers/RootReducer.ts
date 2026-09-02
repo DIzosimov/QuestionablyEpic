@@ -64,6 +64,10 @@ const initialState : RootState = {
     optimizeAllGearOptions: {value: false, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
     selectedGems: {value: [], options: [], category: "gems", type: "hidden", gameType: "Retail"},
     selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
+    // Plan what to spend crests on alongside the run. Its own option rather than part of the replace toggle above:
+    // that one is about what Top Gear may change for free, this is about what the character can afford to buy.
+    // Off by default - it needs the crest cost data in CrestDB, which the app doesn't carry yet.
+    crestSpending: {value: false, options: [true, false], category: "topGear", type: "selector", gameType: "Retail"},
     // Answers "am I willing to re-gem, re-enchant and re-rune", which is a question about the run itself rather
     // than about pinning individual choices. Off keeps the gems, enchants and runes the character already has and
     // only fills what's empty. Rendered as a switch on the settings header beside Optimize Everything (see

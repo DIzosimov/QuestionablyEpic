@@ -530,6 +530,10 @@
         "replaceExistingGems": {
           "title": "Replace Gems & Enchants",
           "tooltip": "On, Top Gear assumes you'll re-gem, re-enchant and re-rune freely. Off, it keeps the gems, enchants and Omnium Folio runes your character already has, and only decides what's empty."
+        },
+        "crestSpending": {
+          "title": "Plan Crest Spending",
+          "tooltip": "Works out which upgrades to buy with the crests you have, in the order to buy them, ranked by healing gained per crest. Needs the crest costs for the current season, which aren't in the app yet."
         }
       },
       "SettingsTitle": "Optional Settings"
