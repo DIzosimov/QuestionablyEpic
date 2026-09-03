@@ -26,7 +26,7 @@ import { Item } from "General/Items/Item";
 import {Player } from "General/Modules/Player/Player";
 import { TopGearResult } from "General/Modules/TopGear/Engine/TopGearResult";
 import { TopGearProgress, estimateEvaluations } from "./Engine/TopGearEngine";
-import { aggregateShardProgress } from "./Engine/ShardProgress";
+import { aggregateShardProgress, workersWorthSpending } from "./Engine/ShardProgress";
 import TopGearReforgePanel from "./TopGearReforgePanel";
 import { getSetting } from "Retail/Engine/EffectFormulas/EffectUtilities";
 import { prepareTopGear } from "./Engine/TopGearEngineClassic";
@@ -696,14 +696,22 @@ export default function TopGear(props: any) {
       // and evaluates a disjoint slice of them, and finishTopGear merges their rankings into one report - see the
       // sharding tests for why the merged result is the same one a single thread produces.
       // Workers are not free: each one parses the engine bundle and builds every database before it evaluates a
-      // single set, which measured at ~0.6s of pure startup. Spending eight of those on a run that takes two
-      // seconds makes it slower, and it showed up as every run having the same floor no matter how small.
-      // So parallelism is bought only once there's enough work for each worker to earn its own startup back.
+      // single set, measured at ~0.6s of pure startup, so eight of them on a two second run made every run share
+      // the same floor however small it was.
+      //
+      // But charging each worker a fixed slice of work went too far the other way. Adding the Nth worker takes the
+      // run from W/(N-1) to W/N, so it saves W/(N(N-1)) - the saving shrinks as workers are added, rather than
+      // each one needing the same amount to justify itself. Requiring a flat 50k evaluations each left a 60k run
+      // single threaded when three workers would have cut it to a third, and that reads exactly as it sounds:
+      // time going back to being linear in the size of the search instead of roughly flat.
+      //
+      // Worth adding while W/(N(N-1)) > startup, so N settles around sqrt(W / startup).
       // One core is left for this thread, so drawing the progress bar never competes with a worker for one.
-      const EVALUATIONS_PER_WORKER = 50000;
+      const EVALUATIONS_PER_SECOND = 10000;   // measured against a real run
+      const WORKER_STARTUP_SECONDS = 0.6;     // measured: engine bundle parse plus database construction
       const maxWorkers = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
       const estimated = estimateEvaluations(itemList, wepCombos, playerSettings, props.player.spec);
-      const shardCount = Math.max(1, Math.min(maxWorkers, Math.floor(estimated / EVALUATIONS_PER_WORKER)));
+      const shardCount = workersWorthSpending(estimated, maxWorkers, EVALUATIONS_PER_SECOND, WORKER_STARTUP_SECONDS);
       shardProgress.current = [];
 
       Promise.all(Array.from({ length: shardCount }, (_unused, index) =>

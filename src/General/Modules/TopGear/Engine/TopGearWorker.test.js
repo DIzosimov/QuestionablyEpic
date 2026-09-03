@@ -237,3 +237,54 @@ describe("The page adds up what the workers report", () => {
     expect(combined).toBeTruthy();
   });
 });
+
+/*
+  How many workers a run is worth.
+
+  Each one costs a fixed startup - the engine bundle parsed and every database built, measured at ~0.6s - before
+  it evaluates anything. Eight of those on a two second run made every run share the same floor. But charging each
+  worker a flat slice of the work went too far the other way and left mid sized runs single threaded, which shows
+  up as run time going back to being linear in the size of the search rather than roughly flat.
+*/
+describe("Spending workers on a run", () => {
+  const { workersWorthSpending } = require("./ShardProgress");
+  const workers = (evaluations) => workersWorthSpending(evaluations, 8);
+
+  test("a run too small to pay for a second worker gets one", () => {
+    // A second worker has to save more than its own startup, and there isn't that much work here.
+    expect(workers(5000)).toEqual(1);
+    expect(workers(0)).toEqual(1);
+  });
+
+  test("a mid sized run is shared out rather than left on one thread", () => {
+    // The case the flat slice rule got wrong: a 60k run is six seconds alone and two with three workers.
+    expect(workers(60000)).toBeGreaterThan(1);
+    expect(workers(100000)).toBeGreaterThan(2);
+  });
+
+  test("more work means more workers, never fewer", () => {
+    const sizes = [1000, 25000, 60000, 150000, 400000, 2000000];
+    const counts = sizes.map(workers);
+
+    counts.slice(1).forEach((count, i) => expect(count).toBeGreaterThanOrEqual(counts[i]));
+  });
+
+  test("a big run uses everything it's allowed", () => {
+    expect(workers(400000)).toEqual(8);
+    expect(workers(50000000)).toEqual(8);
+  });
+
+  test("it never asks for more workers than the machine allows", () => {
+    expect(workersWorthSpending(50000000, 3)).toEqual(3);
+    expect(workersWorthSpending(50000000, 1)).toEqual(1);
+  });
+
+  test("workers are added as the square root of the work, not in proportion to it", () => {
+    // The saving from each extra worker shrinks - the fourth is worth far less than the second - so the count
+    // grows far more slowly than the work does.
+    const small = workers(100000);
+    const hundredTimesBigger = workersWorthSpending(10000000, 1000);
+
+    expect(hundredTimesBigger / small).toBeLessThan(20);
+  });
+});
