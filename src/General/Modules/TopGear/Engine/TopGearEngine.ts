@@ -286,6 +286,27 @@ export function resolveVariantLimit(userSettings: any): number {
 }
 
 /**
+ * Whether every socket the character is wearing already holds a gem we recognise.
+ *
+ * Only asked while keeping the player's own gems. When it's true the loadout a variant is carrying can't reach a
+ * single socket, so every loadout scores identically and expanding them is work with no possible effect on the
+ * answer - the same reason enchants aren't searched while they're being kept.
+ */
+export function everySocketFilled(itemList: Item[]): boolean {
+  let sockets = 0;
+
+  const filled = (itemList || []).reduce((count: number, item: any) => {
+    if (!item.socket || !item.isEquipped) return count;
+    sockets += item.socket;
+
+    const onItem = (item.gemString || "").split(":").filter((gem: string) => gem !== "").map((gem: string) => parseInt(gem, 10));
+    return count + onItem.slice(0, item.socket).filter((gem: number) => gem > 0 && gemDB.some((g) => g.id === gem)).length;
+  }, 0);
+
+  return sockets > 0 && filled >= sockets;
+}
+
+/**
  * How many distinct gem loadouts a selection produces, without building them.
  * Sockets are interchangeable, so this is combinations with repetition: C(gems + sockets - 1, sockets).
  */
@@ -567,7 +588,11 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
   // Raising the limit past the default raises the gem cap too - a player widening the search wants it widened
   // for gems as well, not just for enchants.
   const gemCap = variantLimit > MAX_SET_VARIANTS ? variantLimit : MAX_GEM_LOADOUTS;
-  const gemLoadouts = searchedGems.length > 1 ? buildGemLoadouts(searchedGems, maxStatSockets, gemCap) : [];
+  // Nothing a loadout says can reach a socket that's keeping the gem it already has, so a character wearing a full
+  // set of gems has no gem search to do. Without this the run evaluates one identical candidate per loadout - with
+  // sixteen gems over four sockets that's several hundred copies of the same answer.
+  const gemsAreSettled = keepsExistingGear(userSettings) && everySocketFilled(itemList);
+  const gemLoadouts = searchedGems.length > 1 && !gemsAreSettled ? buildGemLoadouts(searchedGems, maxStatSockets, gemCap) : [];
 
   // Enchants can be multi-selected per slot too. Gems and enchants are expanded together into a single list of
   // variants, each of which is a complete, wearable configuration ranked alongside every other set.

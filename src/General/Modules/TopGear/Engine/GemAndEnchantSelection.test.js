@@ -1514,3 +1514,71 @@ describe("Keeping the gems and enchants the player already has", () => {
       .toBeGreaterThan(0);
   });
 });
+
+/*
+  Not searching for something that can't change.
+
+  Keeping the character's gems means a variant's gem loadout never reaches a socket - every loadout scores the
+  same, so expanding them is one identical evaluation per loadout. With sixteen gems over four sockets that's
+  several hundred copies of the same answer, which is the shape of slowdown that hides well: the run is busy, the
+  progress bar moves, and none of it can change the result.
+*/
+describe("Gems aren't searched when every socket is keeping what it has", () => {
+  const { everySocketFilled } = require("./TopGearEngine");
+  const SOCKETED = "240890:240890:240890";
+
+  const geared = (gems) => {
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    GEAR.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      if (gems && item.socket) item.gemString = gems;
+      player.addActiveItem(item);
+    });
+    return player;
+  };
+
+  const compared = (player, settings) =>
+    runTopGear(player.activeItems, buildNewWepCombos(player, true), player, "Raid", player.getHPS("Raid"),
+               settings, player.getActiveModel("Raid")).itemsCompared;
+
+  const THREE_GEMS = { selectedGems: [240898, 240890, 240914], gearVariantLimit: 0 };
+
+  test("a full set of sockets is recognised as settled", () => {
+    expect(everySocketFilled(geared(SOCKETED).activeItems)).toBe(true);
+    expect(everySocketFilled(geared(null).activeItems)).toBe(false);
+  });
+
+  test("a gem the database doesn't know leaves the socket unsettled", () => {
+    // It falls back to an automatic pick, so the loadout still has something to say.
+    expect(everySocketFilled(geared("999999:999999:999999").activeItems)).toBe(false);
+  });
+
+  test("keeping a full set of gems searches one loadout, not many", () => {
+    const keeping = compared(geared(SOCKETED), cfg({ ...THREE_GEMS, replaceExistingGems: false }));
+    const replacing = compared(geared(SOCKETED), cfg({ ...THREE_GEMS, replaceExistingGems: true }));
+
+    expect(keeping).toBeLessThan(replacing);
+    // One evaluation per gear set: the loadouts collapsed to nothing worth trying.
+    expect(replacing % keeping).toEqual(0);
+  });
+
+  test("an empty socket still gets searched", () => {
+    // With nothing socketed the loadout decides every socket, so the search is worth paying for.
+    const empty = compared(geared(null), cfg({ ...THREE_GEMS, replaceExistingGems: false }));
+    const settled = compared(geared(SOCKETED), cfg({ ...THREE_GEMS, replaceExistingGems: false }));
+
+    expect(empty).toBeGreaterThan(settled);
+  });
+
+  test("the answer doesn't change, only the work", () => {
+    const player = geared(SOCKETED);
+    const settings = cfg({ ...THREE_GEMS, replaceExistingGems: false });
+    const best = runTopGear(player.activeItems, buildNewWepCombos(player, true), player, "Raid",
+                            player.getHPS("Raid"), settings, player.getActiveModel("Raid")).itemSet;
+
+    // Still wearing the character's own gems, which is what keeping them meant.
+    expect(best.enchantBreakdown["Gems"].slice(1).every((gem) => gem === 240890)).toBe(true);
+  });
+});
