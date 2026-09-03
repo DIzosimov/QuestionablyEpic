@@ -36,6 +36,11 @@ export function createPlayerChars(importedSpec?: string): PlayerChars {
           // The gear the player had. saveAllChar has always written it out; it just wasn't read back, so every
           // reload emptied the item list and the whole selection had to be built again.
           if (player.activeItems) newChar.activeItems = player.activeItems.map((item: any) => Item.fromSaved(item));
+          // Read from the SimC import the same way, and lost on reload for the same reason. Without the runes the
+          // Folio silently falls back to the automatic pick even when the player asked to keep what they have,
+          // and without the crests there is no budget, so a spending plan comes back empty.
+          if (player.folioRunes) newChar.folioRunes = player.folioRunes;
+          if (player.upgradeCurrency) newChar.upgradeCurrency = player.upgradeCurrency;
           //if (player.spec === "Restoration Shaman Classic") newChar.enabled = false;
           specsAdded.push(player.spec);
           charArray.push(newChar);

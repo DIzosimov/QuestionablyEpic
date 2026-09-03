@@ -25,6 +25,45 @@ const draw = (plan) => render(
   </ThemeProvider>,
 );
 
+/*
+  The same plan grouped by piece. The ordered list answers "what next"; this answers "how much does each piece
+  cost me in the end", which is what a piece taking two ranks makes hard to read - it appears twice above and
+  looks like two separate decisions.
+*/
+describe("The per piece summary", () => {
+  // Peaks takes two ranks; the others take one. Modelled on a real plan.
+  const TWO_RANKS = [
+    { id: 268230, slot: "Head", fromLevel: 311, toLevel: 315, crest: "Hero", crests: 20, gain: 614, spent: { [HERO]: 20 } },
+    { id: 268237, slot: "Legs", fromLevel: 311, toLevel: 315, crest: "Hero", crests: 20, gain: 500, spent: { [HERO]: 40 } },
+    { id: 268237, slot: "Legs", fromLevel: 315, toLevel: 318, crest: "Hero", crests: 20, gain: 519, spent: { [HERO]: 60 } },
+  ];
+
+  test("a piece taking two ranks is shown once, with both added up", () => {
+    const { getByText } = draw(TWO_RANKS);
+
+    expect(getByText(/Per piece/)).toBeTruthy();
+    expect(getByText("311 → 318")).toBeTruthy();   // both ranks, as one span
+    expect(getByText("40 Hero crests")).toBeTruthy(); // both purchases, as one cost
+    expect(getByText("+1,019")).toBeTruthy();      // both gains
+  });
+
+  test("the pieces taking one rank are unchanged by the grouping", () => {
+    const { getAllByText } = draw(TWO_RANKS);
+
+    // Head appears in the ordered list and again in the summary, identical both times.
+    expect(getAllByText("20 Hero crests").length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("it isn't drawn when every piece takes a single rank", () => {
+    // Nothing to add up, so the summary would just repeat the list above it.
+    expect(draw(PLAN).queryByText(/Per piece/)).toBeNull();
+  });
+
+  test("the total still counts every purchase", () => {
+    expect(draw(TWO_RANKS).getByText(/Total: 60 Hero/)).toBeTruthy();
+  });
+});
+
 describe("The crest spending panel", () => {
   test("nothing to buy draws nothing, not a bare heading", () => {
     // The common case: the option is off, or every piece is already at its track cap.

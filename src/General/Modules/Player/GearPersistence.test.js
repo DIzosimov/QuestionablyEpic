@@ -73,3 +73,43 @@ describe("Gear survives being saved and loaded", () => {
     expect([].map((saved) => Item.fromSaved(saved))).toEqual([]);
   });
 });
+
+/*
+  The other two things the SimC import reads onto the character. Same gap as the items: written out by
+  saveAllChar, never read back, so a reload quietly undid them.
+*/
+describe("The Folio and crest budget survive a reload too", () => {
+  const savedChar = (player) => JSON.parse(JSON.stringify(player));
+
+  const loaded = (saved) => {
+    // What PlayerChars.init does with a saved character, for the fields under test.
+    const p = new Player("T", "Preservation Evoker", 0, "EU", "R", "Dracthyr", "default", "Retail");
+    if (saved.folioRunes) p.folioRunes = saved.folioRunes;
+    if (saved.upgradeCurrency) p.upgradeCurrency = saved.upgradeCurrency;
+    return p;
+  };
+
+  test("the Folio runes come back", () => {
+    // Without them the Folio falls back to automatic even with "keep what I have" on - wrong, and silently so.
+    const player = new Player("T", "Preservation Evoker", 0, "EU", "R", "Dracthyr", "default", "Retail");
+    player.folioRunes = { 4: 1279609 };
+
+    expect(loaded(savedChar(player)).folioRunes).toEqual({ 4: 1279609 });
+  });
+
+  test("the crest budget comes back", () => {
+    // Without it there is no budget, so a spending plan comes back empty rather than wrong.
+    const player = new Player("T", "Preservation Evoker", 0, "EU", "R", "Dracthyr", "default", "Retail");
+    player.upgradeCurrency = { currencies: { 3445: 100, 3446: 84 }, items: {} };
+
+    expect(loaded(savedChar(player)).upgradeCurrency.currencies).toEqual({ 3445: 100, 3446: 84 });
+  });
+
+  test("a character that never imported still loads", () => {
+    const player = new Player("T", "Preservation Evoker", 0, "EU", "R", "Dracthyr", "default", "Retail");
+    const back = loaded(savedChar(player));
+
+    expect(back.folioRunes).toEqual({});
+    expect(back.upgradeCurrency.currencies).toEqual({});
+  });
+});

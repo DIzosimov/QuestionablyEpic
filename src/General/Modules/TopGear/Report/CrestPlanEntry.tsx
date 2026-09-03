@@ -35,6 +35,23 @@ export default function CrestPlanEntry({ plan = [], language = "en", gameType = 
     .map(([currencyID, amount]) => amount + " " + (CREST_CURRENCIES[Number(currencyID)] || currencyID))
     .join(", ");
 
+  // The same plan by piece rather than by purchase. The ordered list says what to buy next; this says how much
+  // each piece ends up costing, which is the question once you've decided to follow the whole thing - a piece
+  // taking two ranks appears twice above and is easy to read as two separate decisions.
+  const byItem: { id: number; from: number; to: number; crest: string; crests: number; gain: number }[] = [];
+  plan.forEach((purchase) => {
+    const existing = byItem.find((entry) => entry.id === purchase.id && entry.crest === purchase.crest);
+    if (existing) {
+      existing.to = Math.max(existing.to, purchase.toLevel);
+      existing.from = Math.min(existing.from, purchase.fromLevel);
+      existing.crests += purchase.crests;
+      existing.gain += purchase.gain;
+    } else {
+      byItem.push({ id: purchase.id, from: purchase.fromLevel, to: purchase.toLevel,
+                    crest: purchase.crest, crests: purchase.crests, gain: purchase.gain });
+    }
+  });
+
   return (
     <Grid item xs={12}>
       <Paper elevation={0} style={{ backgroundColor: "rgba(28,28,28,0.5)", padding: 10, marginBottom: 8 }}>
@@ -64,6 +81,34 @@ export default function CrestPlanEntry({ plan = [], language = "en", gameType = 
         ))}
 
         <Divider style={{ borderColor: "rgba(255,255,255,0.12)", margin: "8px 0" }} />
+
+        {byItem.length < plan.length ? (
+          <>
+            <Typography variant="caption" style={{ color: "rgba(255,255,255,0.55)", display: "block", marginBottom: 4 }}>
+              {"Per piece, if you follow the whole plan"}
+            </Typography>
+            {byItem.map((entry, index) => (
+              <Grid container key={index} spacing={1} alignItems="center" style={{ marginBottom: 2 }}>
+                <Grid item xs={12} sm={5}>
+                  <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)" }}>
+                    {getTranslatedItemName(entry.id, language, "", gameType)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={4} sm={2}>
+                  <Typography variant="caption">{entry.from + " → " + entry.to}</Typography>
+                </Grid>
+                <Grid item xs={4} sm={3}>
+                  <Typography variant="caption">{entry.crests + " " + entry.crest + " crests"}</Typography>
+                </Grid>
+                <Grid item xs={4} sm={2}>
+                  <Typography variant="caption" style={{ color: "#8fbf6f" }}>{"+" + entry.gain.toLocaleString()}</Typography>
+                </Grid>
+              </Grid>
+            ))}
+            <Divider style={{ borderColor: "rgba(255,255,255,0.12)", margin: "8px 0" }} />
+          </>
+        ) : null}
+
         <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)" }}>{"Total: " + total}</Typography>
       </Paper>
     </Grid>

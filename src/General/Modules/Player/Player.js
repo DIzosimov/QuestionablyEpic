@@ -322,6 +322,8 @@ export class Player {
 
   // The Omnium Folio runes the character has selected, by slot, from the SimC import. Empty when we can't tell.
   folioRunes = {};
+  // The crests and upgrade items the character holds, keyed by currency id, from the SimC import.
+  upgradeCurrency = { currencies: {}, items: {} };
 
   embellishItem = (item, embellishmentName) => {
 
