@@ -291,16 +291,28 @@ export default function TopGear(props: any) {
   const topGearCap = (patronCaps[patronStatus] ? patronCaps[patronStatus] : 30) - ((props.player.spec === "Restoration Druid Classic" || props.player.spec === "Mistweaver Monk Classic") ? 9 : 0); // TODO
   const selectedItemsColor = patronColor[patronStatus];
 
+  /**
+   * Refreshes the item list and writes the gear to storage.
+   *
+   * Every change to a character's items goes through here. They were only ever saved on import, so anything done
+   * afterwards - a piece added by hand, an upgrade, a catalysed item, or just which pieces are ticked - was gone
+   * on the next load and the whole selection had to be built again to change one thing.
+   */
+  const gearChanged = () => {
+    setItemList([...props.player.getActiveItems(activeSlot)]);
+    if (props.allChars && props.allChars.saveAllChar) props.allChars.saveAllChar();
+  };
+
   const upgradeItem = (item: Item, newItemLevel: number, socketFlag: boolean = false, vaultFlag: boolean = false) => {
     let player = props.player;
     player.upgradeItem(item, newItemLevel, socketFlag, vaultFlag);
-    setItemList([...player.getActiveItems(activeSlot)]);
+    gearChanged();
   }
 
   const embellishItem = (item: Item, embellishmentName: string) => {
     let player = props.player;
     player.embellishItem(item, embellishmentName);
-    setItemList([...player.getActiveItems(activeSlot)]);
+    gearChanged();
   }
 
   // Adds a copy of a crafted item made with a different pair of secondaries, so both can be compared rather than
@@ -308,13 +320,13 @@ export default function TopGear(props: any) {
   const recraftItem = (item: Item, missives: string) => {
     let player = props.player;
     player.recraftItem(item, missives);
-    setItemList([...player.getActiveItems(activeSlot)]);
+    gearChanged();
   }
 
   const setCustomItemOptions = (item: Item, selectedOption: number[]) => {
     let player = props.player;
     player.changeCustomOption(item, selectedOption);
-    setItemList([...player.getActiveItems(activeSlot)]);
+    gearChanged();
   }
 
   // Right now the available item levels are static, but given the removal of titanforging each item could hypothetically share
@@ -539,14 +551,14 @@ export default function TopGear(props: any) {
   const deleteItem = (unique: string) => {
     let player = props.player;
     player.deleteActiveItem(unique);
-    setItemList([...player.getActiveItems(activeSlot)]);
+    gearChanged();
     handleClickDelete();
   };
 
   const catalyzeItem = (item: Item) => {
     let player = props.player;
     player.catalyzeItem(item);
-    setItemList([...player.getActiveItems(activeSlot)]);
+    gearChanged();
     // handleClickDelete();
   };
 
@@ -960,7 +972,7 @@ export default function TopGear(props: any) {
     if (selectedItemCount < topGearCap || active) {
       let player = props.player;
       player.activateItem(unique);
-      setItemList([...player.getActiveItems(activeSlot)]);
+      gearChanged();
       setBtnActive(checkTopGearValid());
     }
   };

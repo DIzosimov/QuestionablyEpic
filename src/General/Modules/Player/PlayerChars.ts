@@ -1,3 +1,4 @@
+import Item from "General/Items/Item";
 import Player from "./Player";
 import * as ls from "local-storage";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
@@ -32,6 +33,9 @@ export function createPlayerChars(importedSpec?: string): PlayerChars {
           let newChar = new Player(player.charName, player.spec, index, player.region, player.realm, player.race, player.statWeights, player.gameType);
           if (player.activeModelID) newChar.initializeModels(player.activeModelID.Raid, player.activeModelID.Dungeon);
           if (player.savedPTRString) newChar.savedPTRString = player.savedPTRString;
+          // The gear the player had. saveAllChar has always written it out; it just wasn't read back, so every
+          // reload emptied the item list and the whole selection had to be built again.
+          if (player.activeItems) newChar.activeItems = player.activeItems.map((item: any) => Item.fromSaved(item));
           //if (player.spec === "Restoration Shaman Classic") newChar.enabled = false;
           specsAdded.push(player.spec);
           charArray.push(newChar);

@@ -170,6 +170,17 @@ export class Item {
     }
   }
 
+  /**
+   * Rebuilds an item from the plain object it was saved as.
+   *
+   * The constructor derives stats, quality and sockets from the item id, which would undo anything the player
+   * changed - an upgraded level, a chosen embellishment, a catalysed piece. So the saved fields are laid over a
+   * bare instance instead, which gets the methods back without recomputing anything.
+   */
+  static fromSaved(saved: any): Item {
+    return Object.assign(Object.create(Item.prototype), saved) as Item;
+  }
+
   clone(): Item {
     const clonedItem = new Item(
       this.id,
