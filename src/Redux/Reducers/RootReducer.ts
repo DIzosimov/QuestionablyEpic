@@ -53,10 +53,51 @@ const initialState : RootState = {
     //gemSettings: {value: "Simple", options: ["Simple", /*"Precise (Beta)"*/], category: "topGear", type: "selector", gameType: "Retail"}, // TODO: Add a "Keep current".
     //runeChoice: {value: "Automatic", options: ["Automatic", "Haste", "Crit", "Mastery"], category: "topGear", type: "selector", gameType: "Retail"},
     flaskChoice: {value: "Automatic", options: ["Automatic", "Crit", "Mastery", "Versatility", "Haste"], category: "topGear", type: "selector", gameType: "Retail"},
+
+    // Gems, enchants and Folio runes. 0 / "Automatic" means "let the engine pick", which is what it did before
+    // any of this was selectable, so an untouched profile produces identical results.
+    // detailedGearOptions gates the whole section: off, the engine ignores every setting below and Top Gear runs
+    // exactly as it did before they existed.
+    detailedGearOptions: {value: false, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
+    // Optimise everything instead of pinning it: Top Gear searches every gem, enchant and Folio rune itself.
+    // Rendered as a switch on the settings header (see Settings.tsx), not inside the panel, so it's hidden here.
+    optimizeAllGearOptions: {value: false, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
+    selectedGems: {value: [], options: [], category: "gems", type: "hidden", gameType: "Retail"},
+    selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
+    // Plan what to spend crests on alongside the run. Its own option rather than part of the replace toggle above:
+    // that one is about what Top Gear may change for free, this is about what the character can afford to buy.
+    // Off by default - it needs the crest cost data in CrestDB, which the app doesn't carry yet.
+    crestSpending: {value: false, options: [true, false], category: "topGear", type: "selector", gameType: "Retail"},
+    // Answers "am I willing to re-gem, re-enchant and re-rune", which is a question about the run itself rather
+    // than about pinning individual choices. Off keeps the gems, enchants and runes the character already has and
+    // only fills what's empty. Rendered as a switch on the settings header beside Optimize Everything (see
+    // Settings.tsx) rather than in the panel, so it's hidden here. The key still says gems because renaming it
+    // would quietly reset the choice on every saved profile.
+    replaceExistingGems: {value: true, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
+    enchantChoices: {value: {}, options: [], category: "enchants", type: "hidden", gameType: "Retail"},
+    // How far the gem x enchant expansion is allowed to run. 0 means no limit - every combination is evaluated,
+    // which is exhaustive but grows fast, so the panel shows the projected count before a run.
+    // No limit by default: an untouched profile expands nothing, so this only bites once the player multi-selects,
+    // and at that point they've asked for those combinations and should get all of them.
+    gearVariantLimit: {value: 0, options: [24, 60, 150, 500, 2000, 0], category: "gems", type: "hidden", gameType: "Retail"},
+    // Flasks and food are searchable too. Empty means the single choice in the consumables settings below stands,
+    // which is what an untouched profile has, so nothing changes until the player pins something.
+    flaskChoices: {value: [], options: ["Haste", "Crit", "Mastery", "Versatility"], category: "consumables", type: "hidden", gameType: "Retail"},
+    foodChoices: {value: [], options: ["Intellect Food", "Amani Cornucopia", "None"], category: "consumables", type: "hidden", gameType: "Retail"},
+    // Slot 4 is the Folio's secondary stat slot and the only one worth choosing between - see FOLIO_SLOT_SETTINGS.
+    // It holds a list of pinned runes; empty is Automatic. The bare string it used to hold is still accepted,
+    // since that's what already-saved profiles have (see getFolioChoices).
+    folioSlot4: {value: [], options: ["Haste", "Crit", "Mastery", "Vers"], category: "omniumFolio", type: "hidden", gameType: "Retail"},
+
+    // Consumables. Only options with real modelled values are offered - see the consumables block in TopGearEngine.
+    foodBuff: {value: "Intellect Food", options: ["Intellect Food", "Amani Cornucopia", "None"], category: "consumables", type: "selector", gameType: "Retail"},
+    weaponOil: {value: true, options: [true, false], category: "consumables", type: "selector", gameType: "Retail"},
+    vantusRune: {value: true, options: [true, false], category: "consumables", type: "selector", gameType: "Retail"},
     liningUptime: { value: 60, options: [], category: "embellishments", type: "Entry", gameType: "Retail" },
 
     // Spec values:
     masteryEffectivenessShaman: { value: 20, options: [], category: "specSpecific", type: "Entry", gameType: "Retail", spec: "Restoration Shaman" },
+    masteryEffectivenessEvoker: { value: 90, options: [], category: "specSpecific", type: "Entry", gameType: "Retail", spec: "Preservation Evoker" },
     fightLengthShaman: { value: "Long", options: ["Long", "Short"], category: "specSpecific", type: "selector", gameType: "Retail", spec: "Restoration Shaman" },
     innervateCountShaman: { value: 0, options: [], category: "specSpecific", type: "Entry", gameType: "Retail", spec: "Restoration Shaman" },
 

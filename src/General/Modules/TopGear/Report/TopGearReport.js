@@ -35,8 +35,17 @@ import { getWHData } from "./WowheadGearPlannerExport";
 import { trackPageView } from "Analytics";
 import TopGearReportTabs from "./TopGearReportTabs";
 import TopGearFolioEntry from "./TopGearFolioEntry";
+import CrestPlanEntry from "./CrestPlanEntry";
 
-async function fetchReport(reportCode, setResult, setBackgroundImage) {
+export async function fetchReport(reportCode, setResult, setBackgroundImage, setLoadFailed = () => {}) {
+  // A direct visit to /report/, or a refresh after a run, has no code to load: the path splits to an empty string.
+  // Without this we ask the API for reportID= and get an empty body back, and res.json() turns that into an
+  // uncaught "unexpected end of data" rather than anything the page can show.
+  if (!reportCode) {
+    setLoadFailed(true);
+    return;
+  }
+
   // Check that the reportCode is acceptable.
   /*const requestOptions = {
     method: 'GET',
@@ -47,10 +56,17 @@ async function fetchReport(reportCode, setResult, setBackgroundImage) {
   const url =
     "https://questionablyepic.com/api/getReport.php?reportID=" + reportCode;
 
-  fetch(url)
-    .then((res) => res.json())
-    .then((data) => {
-      //console.log(data);
+  // Returned so a caller - or a test - can wait for the load to finish.
+  return fetch(url)
+    // Read as text first: a missing report comes back with an empty body, which is not JSON.
+    .then((res) => res.text())
+    .then((body) => {
+      if (!body) {
+        console.log("INVALID REPORT");
+        setLoadFailed(true);
+        return;
+      }
+      const data = JSON.parse(body);
 
       if (typeof data === "string") {
         const jsonData = JSON.parse(data);
@@ -64,14 +80,20 @@ async function fetchReport(reportCode, setResult, setBackgroundImage) {
         );
         setResult(JSON.parse(data));
       } else if (typeof data === "object") {
-        if ("status" in data && data.status === "Report not found")
+        if ("status" in data && data.status === "Report not found") {
           console.log("INVALID REPORT");
+          setLoadFailed(true);
+        }
       } else {
         console.error("Invalid Report Data Type");
+        setLoadFailed(true);
       }
+    })
+    // A failed request or a body that isn't JSON shouldn't reach the player as a runtime error overlay.
+    .catch((err) => {
+      console.error("Could not load report " + reportCode, err);
+      setLoadFailed(true);
     });
-
-  //.catch(err => { throw err });
 }
 
 const smallClassIcon = (spec) => {
@@ -116,6 +138,8 @@ function TopGearReport(props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const handleDialogOpen = () => setDialogOpen(true);
   const [backgroundImage, setBackgroundImage] = useState("");
+  // Set when there's no report to load at all, so the page can say so instead of loading indefinitely.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [dialogText, setDialogText] = useState("");
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.language;
@@ -173,7 +197,8 @@ function TopGearReport(props) {
       fetchReport(
         location.pathname.split("/")[2],
         setResult,
-        setBackgroundImage
+        setBackgroundImage,
+        setLoadFailed
       );
     }
   }, []);
@@ -192,9 +217,10 @@ function TopGearReport(props) {
       dialogText,
       setDialogText
     );
+  } else if (loadFailed) {
+    return <div style={{ padding: 24 }}>That report couldn't be loaded. Run Top Gear again to make a new one.</div>;
   } else {
     return <div style={{}}>Loading...</div>;
-    //return fetchReport("pbnzfwyv");
   }
 }
 
@@ -273,9 +299,41 @@ function displayReport(
     }
   });
 
+  // Absent unless the player asked for a plan, and empty when nothing is affordable or everything is capped.
+  const crestPlan = result.crestPlan || [];
+
+  // Gem position isn't modelled: the engine picks one multiset for the whole set and the report hands them out in
+  // slot order, so which item ends up with which gem is an artefact of that ordering. A gem therefore only counts
+  // as a change if the set as a whole gains one - comparing per item flagged two identical gems trading places as
+  // two changes, and made a run that changes nothing look like it wanted re-gemming.
+  const equippedGemPool = [];
+  fullItemList.forEach((item) => {
+    if (!item.isEquipped) return;
+    (item.gemString || "").split(":").filter((gem) => gem !== "").forEach((gem) => equippedGemPool.push(Number(gem)));
+  });
+  fullItemList.forEach((item) => {
+    item.newGems = (item.socketedGems || []).map((gem) => {
+      const alreadyWorn = equippedGemPool.indexOf(gem);
+      if (alreadyWorn === -1) return true;
+      // Each gem the player owns excuses one recommendation, so asking for two of something they have one of
+      // still marks the second.
+      equippedGemPool.splice(alreadyWorn, 1);
+      return false;
+    });
+  });
+
   // fullItemList includes all items selected, itemList will filter that to only items that were chosen in the top set.
   itemList = fullItemList.filter(item => item.isChosen);
   if (itemList.length === 0) itemList = fullItemList; // Fallback for older reports that don't have non-chosen items on them. Can be removed on a patch launch.
+
+  // Both rings are enchanted independently, so each ring card has to know which of the two it is - they share a
+  // slot name and would otherwise both look up the same entry, or none at all.
+  const enchantSlots = new Map();
+  let ringsSeen = 0;
+  itemList.forEach((item) => {
+    if (item.slot === "Finger") enchantSlots.set(item, "Finger" + ++ringsSeen);
+  });
+  const enchantSlotFor = (item) => enchantSlots.get(item) || item.slot;
 
   console.log(fullItemList);
   console.log(topSet);
@@ -466,7 +524,15 @@ function displayReport(
                     </Grid>
                   </Grid>
 
+                  <CrestPlanEntry plan={crestPlan} language={currentLanguage} gameType={gameType} />
+
                   <Grid item xs={12}>
+                    {/* The cards mark what to change; without a key a gold ring is just a mystery. */}
+                    {gameType === "Retail" ? (
+                      <Typography variant="caption" style={{ color: "#f0c674", display: "block", margin: "0 0 6px 4px" }}>
+                        {"Outlined in gold: items you aren't currently wearing, and gems that aren't currently socketed."}
+                      </Typography>
+                    ) : null}
                     <Grid
                       container
                       direction={{ xs: "column", md: "row" }}
@@ -507,6 +573,7 @@ function displayReport(
                                 item={item}
                                 activateItem={true}
                                 enchants={enchants}
+                                enchantSlot={enchantSlotFor(item)}
                                 gems={getGemIDs(item.slot)}
                                 firstSlot={topSet.firstSocket === item.slot}
                                 primGems={topSet.primGems || ""}
@@ -514,7 +581,7 @@ function displayReport(
                               />
                             ))}
                           {/*newWeaponCombos.map((item, index) => (
-                            <ItemCardReport key={index + "weapons"} item={item} activateItem={true} enchants={enchants} gems={getGemIDs(item.slot)} firstSlot={topSet.firstSocket === item.slot}  />
+                            <ItemCardReport key={index + "weapons"} item={item} activateItem={true} enchants={enchants} enchantSlot={enchantSlotFor(item)} gems={getGemIDs(item.slot)} firstSlot={topSet.firstSocket === item.slot}  />
                           ))*/}
                         </Grid>
                       </Grid>
@@ -561,6 +628,7 @@ function displayReport(
                                 item={item}
                                 activateItem={true}
                                 enchants={enchants}
+                                enchantSlot={enchantSlotFor(item)}
                                 gems={getGemIDs(item.slot)}
                                 firstSlot={topSet.firstSocket === item.slot}
                                 primGems={topSet.primGems || ""}
@@ -570,7 +638,7 @@ function displayReport(
                         </Grid>
                         <Grid>
                           
-                          {gameType === "Retail" ? <TopGearFolioEntry folioGems={topSet.folioGems} /> : null}
+                          {gameType === "Retail" ? <TopGearFolioEntry folioGems={topSet.folioGems} folioAuto={topSet.folioAuto} /> : null}
 
 
                         </Grid>
@@ -595,6 +663,8 @@ function displayReport(
                             spec={player.spec}
                             currentLanguage={currentLanguage}
                             gameType={gameType}
+                            setHPS={topSet.setHPS}
+                            equippedHPS={result.equippedHPS}
                           />
                         </Grid>
                       </Grid>

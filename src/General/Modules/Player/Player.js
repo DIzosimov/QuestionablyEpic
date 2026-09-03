@@ -2,7 +2,8 @@
 import SPEC from "../../Engine/SPECS";
 import { STATCONVERSION } from "../../Engine/STAT";
 import Item from "../../Items/Item";
-import { scoreItem, getItemDB, getItemAllocations, calcStatsAtLevel } from "../../Engine/ItemUtilities";
+import { scoreItem, getItemDB, getItemAllocations, calcStatsAtLevel, getItemProp,
+         parseMissives, craftedStatIDs, missiveBonusIDs } from "../../Engine/ItemUtilities";
 import { getUnique } from "./PlayerUtilities";
 import CastModel from "./CastModel";
 import { reportError } from "../../SystemTools/ErrorLogging/ErrorReporting";
@@ -254,34 +255,36 @@ export class Player {
     item.convertToTier(this.spec);
   }
   
+  // Adds a catalyzed copy of an item alongside the original, so Top Gear can weigh the set bonus against whatever
+  // the piece was before. The copy keeps the original's stats outright - the catalyst changes what an item counts
+  // as, not what it grants.
   catalyzeItem = (originalItem) => {
     const slot = originalItem.slot;
-    const pClass = this.spec;
-    const classTag = CONSTANTS.tierSetIDs[pClass];
+    const classTag = CONSTANTS.tierSetIDs[this.spec];
 
-    const temp = getItemDB("Retail").filter(function (item) {
-      return item.slot === slot && item.itemSetId === classTag;
-    });
-
-    if (temp.length > 0) {
-      const match = temp[temp.length - 1];
-      const newItem = new Item(match.id, "", slot, originalItem.socket, originalItem.tertiary, 0, originalItem.level, "", "Retail", originalItem.id);
-      Object.assign(newItem, { isCatalystItem: true });
-      newItem.stats = originalItem.stats;
-      newItem.active = true;
-      newItem.catalyzedID = originalItem.id;
-      if (originalItem.uniqueEquip === "vault") {
-        newItem.uniqueEquip = "vault";
-        newItem.vaultItem = true;
-      }
-      if (originalItem.effect) newItem.effect = originalItem.effect;
-      newItem.quality = 4;
-      newItem.upgradeTrack = originalItem.upgradeTrack;
-      newItem.upgradeRank = originalItem.upgradeRank;
-      this.activeItems = this.activeItems.concat(newItem);
-    } else {
-      // We should probably write an error check here.
+    const tierPieces = getItemDB("Retail").filter((item) => item.slot === slot && item.itemSetId === classTag);
+    if (tierPieces.length === 0) {
+      reportError(this, "Catalyst", "No tier piece found for slot", slot + " / " + this.spec);
+      return;
     }
+
+    const match = tierPieces[tierPieces.length - 1];
+    const newItem = new Item(match.id, "", slot, originalItem.socket, originalItem.tertiary, 0, originalItem.level, "", "Retail", originalItem.id);
+    Object.assign(newItem, { isCatalystItem: true });
+    // Copied, not shared - addStats mutates in place and would otherwise reach back into the original item.
+    newItem.stats = { ...originalItem.stats };
+    newItem.active = true;
+    newItem.catalyzedID = originalItem.id;
+    if (originalItem.uniqueEquip === "vault") {
+      newItem.uniqueEquip = "vault";
+      newItem.vaultItem = true;
+    }
+    if (originalItem.effect) newItem.effect = originalItem.effect;
+    newItem.quality = 4;
+    newItem.upgradeTrack = originalItem.upgradeTrack;
+    newItem.upgradeRank = originalItem.upgradeRank;
+    newItem.gemString = originalItem.gemString;
+    this.activeItems = this.activeItems.concat(newItem);
   };
 
   // Options: Convert to Vault, Add socket, change item level.
@@ -317,6 +320,9 @@ export class Player {
     
   };
 
+  // The Omnium Folio runes the character has selected, by slot, from the SimC import. Empty when we can't tell.
+  folioRunes = {};
+
   embellishItem = (item, embellishmentName) => {
 
     const newItem = item.clone();
@@ -333,6 +339,31 @@ export class Player {
 
     if (newItem) this.activeItems = this.activeItems.concat(newItem);
     
+  };
+
+  /**
+   * Adds a copy of a crafted item made with a different stat combination.
+   *
+   * Same shape as embellishItem: the original is left alone and the copy joins the list, so the two can be
+   * compared against each other rather than one replacing the other. Saves rebuilding the item from scratch in
+   * the add form just to try a different pair of secondaries.
+   */
+  recraftItem = (item, missives) => {
+    const newItem = item.clone();
+    newItem.active = true;
+
+    const missiveStats = parseMissives(missives);
+    if (getItemProp(item.id, "randomStats", item.gameType)) {
+      newItem.craftedStats = craftedStatIDs(missiveStats);
+    } else {
+      newItem.missiveStats = missiveStats;
+      newItem.bonusIDS = missiveBonusIDs(missiveStats);
+    }
+    // Recomputes the item's stats from the new allocation, the same call the add form makes.
+    newItem.updateLevel(item.level, missiveStats);
+
+    this.activeItems = this.activeItems.concat(newItem);
+    return newItem;
   };
 
   changeCustomOption = (item, selectedOption) => {

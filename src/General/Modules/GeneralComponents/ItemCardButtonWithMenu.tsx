@@ -5,7 +5,8 @@ import IconButton from "@mui/material/IconButton";
 import { useTranslation } from "react-i18next";
 import SettingsIcon from "@mui/icons-material/Settings";
 import { CONSTANTS } from "General/Engine/CONSTANTS";
-import { getItemEffectOptions, getItemProp } from "General/Engine/ItemUtilities";
+import { getItemEffectOptions, getItemProp, hasUnallocatedStats, craftedStatLabel,
+         CRAFTED_STAT_CHOICES, CRAFTED_STAT_CHOICES_RANDOM } from "General/Engine/ItemUtilities";
 import CatalyzedFromIndicator from "./CatalyzedFromIndicator";
 
 interface MenuItemType {
@@ -26,6 +27,7 @@ interface ItemCardButtonWithMenuProps {
   upgradeItem: (item: any, ilvlMinimum: number, socketFlag: boolean, vaultFlag: boolean) => void;
   embellishItem: (item: any, embellishmentName: string) => void;
   setCustomItemOptions: (item: any, selectedOption: number[]) => void;
+  recraftItem?: (item: any, missives: string) => void;
   item: any;
   gameType?: gameTypes;
 }
@@ -58,6 +60,11 @@ const getMenuItems = (item: any): MenuItemType[] => {
   return items;
 };
 
+/** Whether the item's secondaries were chosen when it was made, and so can be chosen differently. */
+const isRecraftable = (item: any): boolean =>
+  Boolean((getItemProp(item.id, "crafted") && hasUnallocatedStats(item.id, "Retail")) ||
+          getItemProp(item.id, "randomStats", "Retail"));
+
 const getExtraMenuItems = (item: any, gameType: gameTypes): MenuItemType[] => {
   const items: MenuItemType[] = [];
 
@@ -70,15 +77,32 @@ const getExtraMenuItems = (item: any, gameType: gameTypes): MenuItemType[] => {
   }
   if (!item.vaultItem && gameType === "Retail") items.push({id: items.length + 1, type: "vault", ilvlMinimum: 0, label: "Convert to Vault"})
 
-  if (item.effect === "") {
-    const itemOptions = getItemEffectOptions(item.id);
+  // Embellishments are offered whether or not the item already carries one: picking one adds a copy of the item
+  // with that embellishment rather than changing this one, so swapping is just adding a differently embellished
+  // twin. The one it already has is left out, since copying it would produce a duplicate.
+  const currentEffect = item.effect ? item.effect.name : "";
+  getItemEffectOptions(item.id)
+    .filter((option: {effectName: string}) => option.effectName !== currentEffect)
+    .forEach((option: {type: string, label: string, effectName: string}) => {
+      items.push({
+        id: items.length + 1, ilvlMinimum: 0, type: option.type,
+        label: (currentEffect ? "Copy with " : "Add ") + option.type + ": " + option.label,
+        effectName: option.effectName,
+      });
+    });
 
-    if (itemOptions.length > 0) {
-      itemOptions.forEach((option: {type: string, label: string, effectName: string}) => {
-        items.push({id: items.length + 1, ilvlMinimum: 0, type: option.type, label: "Add " + option.type + ": " + option.label, effectName: option.effectName})
-      })
-    }
-  }  
+  // The same for the two secondaries a crafted item is made with - a copy carrying a different pair, rather than
+  // rebuilding the item from scratch in the add form to try one.
+  if (gameType === "Retail" && isRecraftable(item)) {
+    const current = craftedStatLabel(item);
+    const choices = getItemProp(item.id, "randomStats", gameType) ? CRAFTED_STAT_CHOICES_RANDOM : CRAFTED_STAT_CHOICES;
+    choices
+      .filter((choice) => choice !== current)
+      .forEach((choice) => {
+        items.push({ id: items.length + 1, ilvlMinimum: 0, type: "recraft", label: "Copy with: " + choice, effectName: choice });
+      });
+  }
+
   /*
   if (item.effect === "" && getItemProp(item.id, "crafted") && (item.slot.includes("Weapon") || item.slot === "Offhand")) {
     items.push({id: items.length + 1, ilvlMinimum: 0, type: "embellishment", label: "Add Embellishment: Darkmoon Sigil: Ascension", effectName: "Darkmoon Sigil: Ascension"})
@@ -102,7 +126,7 @@ const getExtraMenuItems = (item: any, gameType: gameTypes): MenuItemType[] => {
 
 }
 
-const ItemCardButtonWithMenu: React.FC<ItemCardButtonWithMenuProps> = ({ key, deleteActive, deleteItem, canBeCatalyzed, catalyseItemCard, itemLevel, upgradeItem, setCustomItemOptions, embellishItem, item, gameType }) => {
+const ItemCardButtonWithMenu: React.FC<ItemCardButtonWithMenuProps> = ({ key, deleteActive, deleteItem, canBeCatalyzed, catalyseItemCard, itemLevel, upgradeItem, setCustomItemOptions, embellishItem, recraftItem, item, gameType }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const { t } = useTranslation();
 
@@ -126,6 +150,7 @@ const ItemCardButtonWithMenu: React.FC<ItemCardButtonWithMenuProps> = ({ key, de
     if (menuItem.type === "socket") upgradeItem(item, 0, true, false);
     else if (menuItem.type === "vault") upgradeItem(item, 0, false, true);
     else if (menuItem.type === "embellishment") embellishItem(item, menuItem.effectName);
+    else if (menuItem.type === "recraft") { if (recraftItem) recraftItem(item, menuItem.effectName as unknown as string); }
     else if (menuItem.type === "custom") setCustomItemOptions(item, menuItem.effectName);
     handleClose();
 

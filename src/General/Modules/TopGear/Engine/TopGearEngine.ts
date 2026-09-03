@@ -1,3 +1,4 @@
+import { planCrestSpending, UpgradeStep, PlannedPurchase, CrestBudget } from "./CrestSpending";
 import ItemSet from "../ItemSet";
 import TopGearResult from "./TopGearResult";
 import { STATCONVERSION } from "../../../Engine/STAT";
@@ -6,17 +7,21 @@ import { convertPPMToUptime, getSetting, getDiminishedValue } from "../../../../
 import Player from "../../Player/Player";
 import CastModel from "../../Player/CastModel";
 import { getEffectValue } from "../../../../Retail/Engine/EffectFormulas/EffectEngine";
-import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems } from "General/Engine/ItemUtilities";
+import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished, getGearOption,
+         buildChoiceCombinations, countChoiceCombinations, pinnedSlots, isOptimizeAllGear, keepsExistingGear } from "General/Engine/ItemUtilities";
+import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTrinketValue } from "Retail/Engine/EffectFormulas/Generic/Trinkets/TrinketEffectFormulas";
 import { allRamps, allRampsHealing, getDefaultDiscTalents } from "General/Modules/Player/ClassDefaults/DisciplinePriest/DiscRampUtilities";
 import { buildRamp } from "General/Modules/Player/ClassDefaults/DisciplinePriest/DiscRampGen";
 import { getItemSet, getSeasonalTier } from "Classic/Databases/RetailItemSetDB";
-import { CONSTANTS } from "General/Engine/CONSTANTS";
+import { CONSTANTS, MODEL_TYPES } from "General/Engine/CONSTANTS";
 import { getCircletEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/CyrcesCircletData"
 import { generateReportCode } from "General/Modules/TopGear/Engine/TopGearEngineShared"
 import Item from "General/Items/Item";
-import { gemDB } from "Databases/GemDB";
-import { getFolioEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
+import { gemDB, getCurrentStatGems, GEM_MAJOR_STAT, GEM_MINOR_STAT } from "Databases/GemDB";
+import { getEnchantById, getDefaultEnchant, getEnchantsForSlot, ENCHANTABLE_SLOTS, RING_SLOTS, enchantSlotSource,
+         WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION, BEST_SECONDARY, getEnchantByEnchantID } from "Databases/EnchantDB";
+import { getFolioEffect, getFolioGems, buildFolioCombinations, countFolioCombinations, getShortName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 
 /**
  * == Top Gear Engine ==
@@ -48,6 +53,8 @@ function setupPlayer(player: Player, contentType: contentTypes, castModel: any) 
   //newPlayer.castModel[contentType] = Object.assign(newPlayer.castModel[contentType], castModel);
 
   newPlayer.activeModelID = player.activeModelID;
+  // Carried across the worker boundary, where the player arrives as plain data rather than a Player.
+  newPlayer.folioRunes = player.folioRunes || {};
 
   return newPlayer;
 }
@@ -74,7 +81,7 @@ function autoSocketItems(itemList: Item[]) {
 // This just grab the ID for us so that we're less likely to make errors.
 function getGemID(bigStat: string, littleStat: string): number {
   const foundGem = gemDB.filter(gem => bigStat in gem.stats && littleStat in gem.stats
-                                        && gem.stats[bigStat] === 12 && gem.stats[littleStat] === 5);
+                                        && gem.stats[bigStat] === GEM_MAJOR_STAT && gem.stats[littleStat] === GEM_MINOR_STAT);
   if (foundGem.length > 0) {
     return foundGem[0].id;
   }
@@ -158,6 +165,54 @@ function getMidnightGemOptions(spec: string, contentType: contentTypes, settings
 
 }
 
+/**
+ * Works out which gems a set is actually wearing.
+ *
+ * Top Gear has always ignored the player's socketed gems and assigned its own to every socket, which quietly
+ * assumes they'll re-gem the whole set. `replaceExistingGems` makes that explicit:
+ *   - true  : every socket gets the pinned (or automatic) gem, as before.
+ *   - false : sockets that already hold a gem keep it, and only empty ones are filled.
+ */
+function resolveSetGems(builtSet: any, player: Player, contentType: contentTypes, userSettings: any, gemLoadout?: number[],
+                        keepEquippedGems: boolean = false): number[] {
+  const sockets = Math.max(0, builtSet.setSockets);
+  if (sockets === 0) return [];
+
+  const automatic = getMidnightGemOptions(player.spec, contentType, userSettings);
+
+  // Stat sockets take, in order of preference: the loadout this variant is evaluating, the player's single pinned
+  // gem, or the engine's own pick. Meta is socket 0 and is chosen separately, being interchangeable with nothing.
+  const loadout = gemLoadout && gemLoadout.length > 0 ? gemLoadout : null;
+  const searchedGems = getGemSearchSpace(userSettings);
+  const pinnedFiller = searchedGems.length === 1 ? searchedGems[0] : null;
+  const pinnedMeta = getGearOption(userSettings, "selectedMetaGem", 0);
+
+  const buildAutomatic = () => {
+    const gems = automatic.slice(0, sockets);
+    if (gems.length > 0) gems[0] = typeof pinnedMeta === "number" && pinnedMeta > 0 ? pinnedMeta : automatic[0];
+    for (let i = 1; i < gems.length; i++) {
+      if (loadout) gems[i] = loadout[(i - 1) % loadout.length];
+      else if (pinnedFiller) gems[i] = pinnedFiller;
+    }
+    return gems;
+  };
+
+  // keepEquippedGems is how the equipped set asks for its own gems regardless of the setting - it's measuring what
+  // the player is actually wearing, not what they'd have after re-gemming.
+  if (!keepEquippedGems && !keepsExistingGear(userSettings)) return buildAutomatic();
+
+  // Fill-empty mode: keep what's already socketed, top up the rest. Equipped gems come from the SimC import,
+  // which stores them on the item as a colon separated gemString.
+  const equipped: number[] = [];
+  (builtSet.itemList || []).forEach((item: any) => {
+    if (!item.socket) return;
+    const onItem = (item.gemString || "").split(":").filter((g: string) => g !== "").map((g: string) => parseInt(g, 10));
+    for (let i = 0; i < item.socket; i++) equipped.push(onItem[i] && gemDB.some((g) => g.id === onItem[i]) ? onItem[i] : 0);
+  });
+
+  return buildAutomatic().map((auto: number, i: number) => equipped[i] || auto);
+}
+
 function getGemStats(gemArray: number[]) {
   const gem_stats: Stats = {};
   gemArray.forEach(gem => {
@@ -176,6 +231,219 @@ function getGemStats(gemArray: number[]) {
 
 
   return gem_stats;
+}
+
+// Gems get their own, tighter default cap: the whole gem spread is worth a fraction of a percent, so it isn't
+// worth spending the run's entire variant budget on.
+const MAX_GEM_LOADOUTS = 12;
+
+/**
+ * The distinct ways the player's pinned gems can fill a set's sockets.
+ *
+ * Sockets are interchangeable for stat purposes, so only the multiset matters - two of gem A and one of gem B is
+ * the same stats whichever socket holds which - which keeps this to combinations rather than permutations.
+ */
+export function buildGemLoadouts(pinnedGems: number[], sockets: number, cap: number = MAX_GEM_LOADOUTS): number[][] {
+  const gems = (pinnedGems || []).filter((g) => g > 0);
+  if (gems.length === 0 || sockets <= 0) return [];
+  if (gems.length === 1) return [new Array(sockets).fill(gems[0])];
+
+  const loadouts: number[][] = [];
+  // Combinations with repetition: never step back past the gem we're on, so each multiset is produced once.
+  const fillFrom = (firstGem: number, loadout: number[]) => {
+    if (loadouts.length >= cap) return;
+    if (loadout.length === sockets) { loadouts.push(loadout.slice()); return; }
+    for (let g = firstGem; g < gems.length && loadouts.length < cap; g++) {
+      loadout.push(gems[g]);
+      fillFrom(g, loadout);
+      loadout.pop();
+    }
+  };
+  fillFrom(0, []);
+  return loadouts;
+}
+
+// Default number of variants a single run expands into. Every variant re-evaluates every gear set, so the default
+// is deliberately modest - but it is only a default; gearVariantLimit raises it, and 0 removes it entirely.
+const MAX_SET_VARIANTS = 24;
+
+/**
+ * How many variants this run may expand into, with 0 meaning no limit at all.
+ *
+ * Infinity switches the builders below from a truncated search to full combinatorics: exhaustive, and slow in
+ * proportion, since the count is multiplicative and every variant re-evaluates every gear set.
+ */
+export function resolveVariantLimit(userSettings: any): number {
+  // Optimize Everything means "search all of it", so it sets its own depth. Leaving it to a separate dropdown just
+  // meant the switch quietly delivered a truncated search unless you knew to go and raise that too.
+  if (isOptimizeAllGear(userSettings)) return Infinity;
+
+  const raw = getGearOption(userSettings, "gearVariantLimit", MAX_SET_VARIANTS);
+  // The settings panel writes number fields through as strings.
+  const limit = typeof raw === "string" ? parseInt(raw, 10) : raw;
+  if (typeof limit !== "number" || isNaN(limit) || limit < 0) return MAX_SET_VARIANTS;
+  return limit === 0 ? Infinity : limit;
+}
+
+/**
+ * Whether every socket the character is wearing already holds a gem we recognise.
+ *
+ * Only asked while keeping the player's own gems. When it's true the loadout a variant is carrying can't reach a
+ * single socket, so every loadout scores identically and expanding them is work with no possible effect on the
+ * answer - the same reason enchants aren't searched while they're being kept.
+ */
+export function everySocketFilled(itemList: Item[]): boolean {
+  let sockets = 0;
+
+  const filled = (itemList || []).reduce((count: number, item: any) => {
+    if (!item.socket || !item.isEquipped) return count;
+    sockets += item.socket;
+
+    const onItem = (item.gemString || "").split(":").filter((gem: string) => gem !== "").map((gem: string) => parseInt(gem, 10));
+    return count + onItem.slice(0, item.socket).filter((gem: number) => gem > 0 && gemDB.some((g) => g.id === gem)).length;
+  }, 0);
+
+  return sockets > 0 && filled >= sockets;
+}
+
+/**
+ * How many distinct gem loadouts a selection produces, without building them.
+ * Sockets are interchangeable, so this is combinations with repetition: C(gems + sockets - 1, sockets).
+ */
+export function countGemLoadouts(gemCount: number, sockets: number): number {
+  if (gemCount <= 0 || sockets <= 0) return 0;
+  let total = 1;
+  for (let i = 1; i <= sockets; i++) total = (total * (gemCount - 1 + i)) / i;
+  return Math.round(total);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                          Search spaces                                          */
+/* ---------------------------------------------------------------------------------------------- */
+// What a run will actually search, as opposed to what the player pinned. Normally those are the same thing, but
+// "Optimize Everything" replaces the pins with every option there is. Exported so the gear panel can project the
+// real cost of a run from the same numbers the engine will use.
+
+/** The gems a run will try in each stat socket. */
+export function getGemSearchSpace(userSettings: any): number[] {
+  if (isOptimizeAllGear(userSettings)) return getCurrentStatGems().map((gem) => gem.id);
+  const pinned = getGearOption(userSettings, "selectedGems", []);
+  return Array.isArray(pinned) ? pinned.filter((gem: number) => gem > 0) : [];
+}
+
+/**
+ * The player's per-slot enchant choices, with the old single Finger key spread across both ring slots.
+ * Rings used to be one choice for the pair; profiles saved before the split still hold them that way.
+ */
+export function normaliseEnchantChoices(choices: any): any {
+  if (!choices || typeof choices !== "object") return {};
+  if (!choices.Finger) return choices;
+
+  const migrated = { ...choices };
+  RING_SLOTS.forEach((slot) => { if (!migrated[slot]) migrated[slot] = choices.Finger; });
+  delete migrated.Finger;
+  return migrated;
+}
+
+/** The enchants a run will try in each slot. */
+export function getEnchantSearchSpace(userSettings: any, spec: string): any {
+  // Keeping the player's enchants means every combination scores the same on the slots they already have, so
+  // searching them is pure cost. Slots with nothing on fall back to the automatic pick.
+  if (keepsExistingGear(userSettings)) return {};
+  if (!isOptimizeAllGear(userSettings)) return pinnedSlots(normaliseEnchantChoices(getGearOption(userSettings, "enchantChoices", {})));
+
+  const everything: { [slot: string]: string[] } = {};
+  ENCHANTABLE_SLOTS.forEach((slot) => { everything[slot] = getEnchantsForSlot(slot, spec).map((enchant) => enchant.id); });
+  return pinnedSlots(everything);
+}
+
+// The consumables that are a real choice. Flasks all grant the same amount so only the stat differs; food is a
+// straight yes/no until more of it is modelled.
+export const CONSUMABLE_OPTIONS: { [key: string]: string[] } = {
+  flask: ["Haste", "Crit", "Mastery", "Versatility"],
+  food: ["Intellect Food", "Amani Cornucopia", "None"],
+};
+
+/**
+ * What each food grants. A stat of "bestSecondary" is resolved per spec at evaluation time rather than being
+ * pinned here, since which secondary that is depends on the player's weights.
+ *
+ * Adding a food is a row here plus a name in CONSUMABLE_OPTIONS - no other code needs to change.
+ */
+export const FOOD_BUFFS: { [name: string]: { stat: string; amount: number } } = {
+  "Intellect Food": { stat: "intellect", amount: 50 },
+  "Amani Cornucopia": { stat: "bestSecondary", amount: 71.5 },
+};
+
+const CONSUMABLE_SETTINGS: { [key: string]: string } = { flask: "flaskChoices", food: "foodChoices" };
+
+/** The flasks and food a run will try. Empty on an axis means the single choice in the settings panel stands. */
+export function getConsumableSearchSpace(userSettings: any): any {
+  if (isOptimizeAllGear(userSettings)) return { ...CONSUMABLE_OPTIONS };
+
+  const pinned: { [key: string]: string[] } = {};
+  Object.keys(CONSUMABLE_SETTINGS).forEach((key) => {
+    const choice = getGearOption(userSettings, CONSUMABLE_SETTINGS[key], []);
+    pinned[key] = Array.isArray(choice) ? choice : [choice];
+  });
+  return pinnedSlots(pinned);
+}
+
+export const countConsumableCombinations = (userSettings: any): number =>
+  countChoiceCombinations(getConsumableSearchSpace(userSettings));
+
+export const buildConsumableCombinations = (userSettings: any, cap: number = Infinity): any[] =>
+  buildChoiceCombinations(getConsumableSearchSpace(userSettings), cap);
+
+/**
+ * The flask or food this evaluation is using, or null to fall back to the settings panel's single choice.
+ * A variant names one. Failing that a single pinned option is used directly - but several pinned and no variant
+ * means there's no single answer, so the panel's choice stands rather than us guessing at one.
+ */
+function getChosenConsumable(userSettings: any, key: string, consumableOverride?: any): string | null {
+  if (consumableOverride && consumableOverride[key]) return consumableOverride[key];
+
+  const pinned = getGearOption(userSettings, CONSUMABLE_SETTINGS[key], []);
+  return Array.isArray(pinned) && pinned.length === 1 ? pinned[0] : null;
+}
+
+export const countEnchantCombinations = (enchantChoices: any): number => countChoiceCombinations(enchantChoices);
+
+/** Expands the player's per-slot enchant selections into every combination. Empty slots keep the engine's pick. */
+export const buildEnchantCombinations = (enchantChoices: any, cap: number = MAX_SET_VARIANTS): any[] =>
+  buildChoiceCombinations(pinnedSlots(enchantChoices), cap);
+
+/** One complete, wearable configuration for a set. A null axis means the engine's own pick stands for it. */
+export type SetVariant = {
+  gemLoadout: number[] | null;
+  enchantOverride: any;
+  folioOverride: any;
+  consumableOverride: any;
+};
+
+/**
+ * Crosses every axis of the search with every other, capped so a run stays finite.
+ *
+ * Axes are passed by name rather than position because there are four of them now and adding a fifth shouldn't
+ * mean touching every caller. An empty list on any axis means that axis isn't being searched at all.
+ */
+export function buildSetVariants(axes: {
+  gemLoadouts?: number[][]; enchantCombos?: any[]; folioCombos?: any[]; consumableCombos?: any[];
+} = {}, cap: number = MAX_SET_VARIANTS): SetVariant[] {
+  const orNothing = (list?: any[]) => (list && list.length > 0 ? list : [null]);
+  const variants: SetVariant[] = [];
+
+  for (const gemLoadout of orNothing(axes.gemLoadouts)) {
+    for (const enchantOverride of orNothing(axes.enchantCombos)) {
+      for (const folioOverride of orNothing(axes.folioCombos)) {
+        for (const consumableOverride of orNothing(axes.consumableCombos)) {
+          if (variants.length >= cap) return variants;
+          variants.push({ gemLoadout, enchantOverride, folioOverride, consumableOverride });
+        }
+      }
+    }
+  }
+  return variants;
 }
 
 function getGemOptions(spec: string, contentType: contentTypes) {
@@ -216,6 +484,23 @@ function getGemOptions(spec: string, contentType: contentTypes) {
 }
 
 /**
+ * Where a run has got to. `total` is the number of set evaluations the run will do - sets times variants - which
+ * is only known once the sets are built, so it's 0 during the first stage.
+ */
+export type TopGearProgress = { stage: string; done: number; total: number };
+// Which slice of the gear sets a worker is responsible for. One shard of one is the whole run.
+export type TopGearShard = { index: number; count: number };
+const WHOLE_RUN: TopGearShard = { index: 0, count: 1 };
+// What a worker hands back: its own best sets, plus the run-wide figures the report needs.
+export type TopGearShardResult = {
+  rankedSets: any[];
+  setsBuilt: number;
+  embellishedSelected: number;
+  equippedHPS: number;
+};
+export type TopGearProgressCallback = (progress: TopGearProgress) => void;
+
+/**
  * This is our core Top Gear function. It puts together valid sets, then calls for them to be scored.
  *
  * @param {*} rawItemList A raw list of items. This is usually all of the items a player has selected.
@@ -225,10 +510,21 @@ function getGemOptions(spec: string, contentType: contentTypes) {
  * @param {*} baseHPS The models expected HPS. This is also stored in the CastModel but it's included separately for a faster reference. Could probably be rewritten out in future.
  * @param {*} userSettings The players settings. This represents the small settings panel near the top of Top Gear / Upgrade Finder.
  * @param {*} castModel
+ * @param onProgress Called as the run advances so the UI can show where it is. Optional - tests and the Upgrade
+ *                   Finder don't pass one, and the run behaves identically without it.
  * @returns A Top Gear result which includes the best set, and how close various alternatives are.
  */
-export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Player, contentType: contentTypes, 
-                            baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true) {
+/**
+ * One worker's share of a run. Every shard builds the same gear sets and evaluates a disjoint slice of them, so
+ * the shards together cover the run exactly once. Merge the results with finishTopGear.
+ */
+export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: Player, contentType: contentTypes,
+                            baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true,
+                            onProgress?: TopGearProgressCallback, shard: TopGearShard = WHOLE_RUN): TopGearShardResult {
+  const report = onProgress || (() => {});
+  // Sets are built and scored together, so there's no separate building stage to report - only the setup before
+  // any of it starts, which has nothing to count.
+  report({ stage: "Preparing", done: 0, total: 0 });
   //console.log("Running Top Gear")
   // == Setup Player & Cast Model ==
   // Create player / cast model objects in this thread based on data from the player character & player model.
@@ -247,62 +543,232 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
   userSettings = JSON.parse(JSON.stringify(userSettings));
 
   // == Create Valid Item Sets ==
-  // This just builds a set and adds it to our array so that we can score it later.
   // A valid set is just any combination of items that is wearable in-game. Item limits like on legendaries, unique items and so on are all adhered to.
-  let itemSets = createSets(itemList, wepCombos, player.spec);
-  let resultSets = [];
+  // Sets are built and scored one at a time further down rather than collected first, so only their count is
+  // needed here - and that's exact arithmetic on the item list, not something we have to build to find out.
+  const mySetCount = shardSetCount(countGearSets(itemList, wepCombos), shard);
+  // Retaining every evaluation is what used to make a large run die rather than finish: each scored set holds about
+  // 2kb, so a few million of them exhaust the worker heap long before the run ends. Only the top slice is ever read.
+  const rankedSets = new TopSets(softSlice);
 
-  itemSets.sort((a, b) => (a.sumSoftScore < b.sumSoftScore ? 1 : -1));
-  
-  // == Evaluate Sets ==
-  // We'll explain this more in the evalSet function header but we assign each set a score that includes stats, effects and more.
-  for (var i = 0; i < itemSets.length; i++) {
-    // Create sets for each gem type.
-    const gemPoss = getGemOptions(player.spec, contentType) // TODO: Turn this into a function
-
-    if (false) { // Add setting here.
-      if (gemPoss.length > 0) {
-        gemPoss.forEach(gem => {
-          resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, gem));
-        });
-      }
+  // Tracked so the report can explain why a selected embellished item never shows up in a set.
+  const embellishedSelected = itemList.filter((item: Item) => isEmbellished(item)).length;
+  // == Currently equipped set ==
+  // Run the player's current gear through the same evaluation so the report can show how big an upgrade the best
+  // set actually is. Display only, and deliberately outside the ranking loop so it never competes.
+  let equippedHPS = 0;
+  try {
+    const equippedItems = itemList.filter((item: Item) => item.isEquipped);
+    if (equippedItems.length > 0) {
+      // Evaluated wearing the player's own gems rather than the ones Top Gear would socket. The upgrade figure is
+      // meant to answer "how much better is this than what I have on", and re-gemming the baseline made a run that
+      // changed no gear at all still report an upgrade - the gain was the engine re-gemming both sides differently.
+      const equippedSet = evalSet(new ItemSet(-1, equippedItems, 0, player.spec), newPlayer, contentType, baseHPS,
+                                  userSettings, newCastModel, false, 0, undefined, undefined, undefined, undefined, true);
+      equippedHPS = equippedSet.setHPS || 0;
     }
-    else { // Advanced Gems not turned on. 
-      resultSets.push(evalSet(itemSets[i], newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0));
-    }
+  } catch (err) {
+    // A malformed equipped set shouldn't take down the whole run - we just lose the upgrade percentage.
+    reportError(newPlayer, "Top Gear", "Failed to evaluate equipped set for upgrade comparison", String(err));
   }
 
+  // == Evaluate Sets ==
+  // We'll explain this more in the evalSet function header but we assign each set a score that includes stats, effects and more.
+  // Selecting several gems expands each set into one candidate per gem loadout, which are then ranked together -
+  // the same way selecting two rings gives you two candidate sets. Selecting one (or none) leaves this at a
+  // single evaluation per set, exactly as before.
+  const searchedGems = getGemSearchSpace(userSettings);
 
-  // == Sort and Prune sets ==
-  // Prune sets (discard weak sets) outside of our top X sets (usually around 3000 but you can find the variable at the top of this file). This just makes anything further we do faster while not having
-  // an impact on results.
-  //itemSets.sort((a, b) => (a.hardScore < b.hardScore ? 1 : -1));
-  resultSets.sort((a, b) => (a.hardScore < b.hardScore ? 1 : -1));
-  //itemSets = pruneItems(itemSets, userSettings);
-  resultSets = pruneSets(resultSets, userSettings);
-  
+  // Sockets are only known per set, but they're bounded, so build loadouts against the largest set and let each
+  // evaluation take the slice it needs. Socket 0 is the meta, which is chosen separately, so a loadout only ever
+  // fills the stat sockets - building it a gem longer just produces siblings that differ in an entry nobody reads.
+  const maxSockets = maxGearSockets(itemList, wepCombos);
+  const maxStatSockets = Math.max(0, maxSockets - 1);
+  const variantLimit = resolveVariantLimit(userSettings);
+  // Raising the limit past the default raises the gem cap too - a player widening the search wants it widened
+  // for gems as well, not just for enchants.
+  const gemCap = variantLimit > MAX_SET_VARIANTS ? variantLimit : MAX_GEM_LOADOUTS;
+  // Nothing a loadout says can reach a socket that's keeping the gem it already has, so a character wearing a full
+  // set of gems has no gem search to do. Without this the run evaluates one identical candidate per loadout - with
+  // sixteen gems over four sockets that's several hundred copies of the same answer.
+  const gemsAreSettled = keepsExistingGear(userSettings) && everySocketFilled(itemList);
+  const gemLoadouts = searchedGems.length > 1 && !gemsAreSettled ? buildGemLoadouts(searchedGems, maxStatSockets, gemCap) : [];
+
+  // Enchants can be multi-selected per slot too. Gems and enchants are expanded together into a single list of
+  // variants, each of which is a complete, wearable configuration ranked alongside every other set.
+  const enchantCombos = buildEnchantCombinations(getEnchantSearchSpace(userSettings, player.spec), variantLimit);
+
+  // Folio runes are multi-selectable on the same terms. A single pinned rune per slot needs no expansion - it's
+  // applied straight from the settings inside getFolioGems - so only a genuine multi-select becomes variants.
+  const folioCombos = buildFolioCombinations(userSettings, variantLimit);
+
+  // Flasks and food are searchable on the same terms. A single pinned choice needs no expansion - it's read
+  // straight from the settings - so only a genuine multi-select becomes variants.
+  const consumableCombos = buildConsumableCombinations(userSettings, variantLimit);
+
+  const variants = buildSetVariants({
+    gemLoadouts,
+    enchantCombos: enchantCombos.length > 1 ? enchantCombos : [],
+    folioCombos: folioCombos.length > 1 ? folioCombos : [],
+    consumableCombos: consumableCombos.length > 1 ? consumableCombos : [],
+  }, variantLimit);
+
+  // Optimize Everything is a "just find me the best" switch, so the engine's own automatic pick has to be one of
+  // the candidates. A capped search keeps the first N combinations in build order, not the best N, so without this
+  // it can rank below the plain run it was supposed to improve on. Costs one variant; we drop the last to pay.
+  if (isOptimizeAllGear(userSettings) && variants.length > 1) {
+    if (variants.length >= variantLimit) variants.pop();
+    variants.unshift({ gemLoadout: null, enchantOverride: null, folioOverride: null, consumableOverride: null });
+  }
+
+  // Evaluations, not sets: with variants a single set is scored once per configuration, and that multiplier is
+  // exactly what makes a run long enough to need a progress bar in the first place.
+  // Sets are dealt out round robin rather than in blocks: neighbouring sets are near-identical in build order, so
+  // a block split would hand one worker all the good sets and leave another with nothing worth keeping. Round
+  // robin gives every shard the same spread of quality, which matters because each keeps only its own top slice.
+  const totalEvaluations = mySetCount * variants.length;
+  // Report ~100 times over the run, so the bar moves smoothly without the postMessage traffic becoming the cost.
+  const reportEvery = Math.max(1, Math.floor(totalEvaluations / 100));
+  let evaluated = 0;
+
+  // The bar has to keep moving when a whole set's worth of variants is skipped at once, so report on crossing the
+  // next boundary rather than landing exactly on a multiple of it.
+  let nextReport = reportEvery;
+
+  const setsBuilt = forEachGearSet(itemList, wepCombos, player.spec, (gearSet) => {
+    for (var v = 0; v < variants.length; v++) {
+      const variant = variants[v];
+      const scoredSet = evalSet(gearSet, newPlayer, contentType, baseHPS, userSettings, newCastModel, reporting, 0,
+                                variant.gemLoadout || undefined, variant.enchantOverride || undefined, variant.folioOverride || undefined,
+                                variant.consumableOverride || undefined);
+
+      // A set is unwearable because of the items in it - a second vault piece, a third embellishment - and the gems,
+      // enchants and consumables layered over the top can't change that. So the first variant settles it for every
+      // other variant of the same set, and the rest are worth neither evaluating nor keeping.
+      const wearable = v > 0 || scoredSet.verifySet(userSettings);
+      if (wearable) rankedSets.add(scoredSet);
+
+      evaluated += wearable ? 1 : variants.length;
+      if (evaluated >= nextReport) {
+        report({ stage: "Evaluating sets", done: evaluated, total: totalEvaluations });
+        nextReport = evaluated + reportEvery;
+      }
+      if (!wearable) break;
+    }
+  }, shard);
+
+  report({ stage: "Ranking results", done: totalEvaluations, total: totalEvaluations });
+
+  return { rankedSets: rankedSets.toArray(), setsBuilt, embellishedSelected, equippedHPS };
+}
+
+/**
+ * Merges the shards of a run into the report.
+ *
+ * Each shard already holds the best `softSlice` of its own slice, so re-ranking their union and taking the same
+ * slice gives the same sets a single unsharded run would have kept: a set only misses the cut if softSlice better
+ * ones exist, and every one of those is in some shard's own top slice too.
+ */
+export function finishTopGear(shards: TopGearShardResult[], player: Player, contentType: contentTypes,
+                              castModel: any): TopGearResult | null {
+  const newPlayer = setupPlayer(player, contentType, castModel);
+  const merged = new TopSets(softSlice);
+  shards.forEach((shard) => shard.rankedSets.forEach((set: any) => merged.add(set)));
+  const resultSets = merged.toArray();
+
+  const setsBuilt = shards.reduce((total, shard) => total + shard.setsBuilt, 0);
+  const embellishedSelected = shards.length > 0 ? shards[0].embellishedSelected : 0;
+
   // == Build Differentials (sets similar in strength) ==
   // A differential is a set that wasn't our best but was close. We'll display these beneath our top gear so that a player could choose a higher stamina option, or a trinket they prefer
   // and so on if they are already close in strength.
   let differentials = [];
   let primeSet = resultSets[0];
-  for (var k = 1; k < Math.min(CONSTRAINTS.Shared.topGearDifferentials + 1, resultSets.length); k++) {
-    //differentials.push(buildDifferential(itemSets[k], primeSet, newPlayer, contentType));
-    differentials.push(buildDifferential(resultSets[k], primeSet, newPlayer, contentType, newCastModel.modelType[contentType] || "Default"));
+  // Sets that come out wearing exactly what the best set wears are skipped rather than shown: a row with a score
+  // and nothing beside it tells the player nothing. Sets with fewer sockets than the largest one can be gemmed
+  // identically by more than one loadout, so a few of these reach here even with the expansion behaving.
+  for (var k = 1; k < resultSets.length && differentials.length < CONSTRAINTS.Shared.topGearDifferentials; k++) {
+    const differential = buildDifferential(resultSets[k], primeSet, newPlayer, contentType, castModel.modelType[contentType] || "Default");
+    const swaps = differential.items.length + differential.gems.length + differential.enchants.length + differential.runes.length;
+    if (swaps > 0) differentials.push(differential);
   }
 
   // == Return sets ==
   // If we were able to make a set then create a Top Gear result and return it.
   // If not we'll send back an empty set which will show an error to the player. That's pretty rare nowadays but can happen if their SimC has empty slots in it and so on.
   if (resultSets.length === 0) {
+    // Every set we built was thrown out. By far the most common cause is the embellishment cap: a player who already
+    // wears two embellishments and then adds a third embellished item has no wearable combination left, and used to
+    // just get an empty report with no explanation.
+    reportError(newPlayer, "Top Gear", "No valid sets after verification. Sets built: " + setsBuilt +
+                ", embellished items selected: " + embellishedSelected, contentType);
     return null;
   } else {
     let result: TopGearResult = new TopGearResult(resultSets[0], differentials, contentType);
     result.itemsCompared = resultSets.length;
+    result.embellishedSelected = embellishedSelected;
+    result.equippedHPS = shards.length > 0 ? shards[0].equippedHPS : 0;
     result.new = true;
     result.id = generateReportCode();
     return result;
   }
+}
+
+/**
+ * What to spend crests on, for a set the player is actually wearing or aiming at.
+ *
+ * The healing an upgrade is worth is measured by re-scoring the set with that one item raised, through the same
+ * evalSet everything else goes through, so a rank is valued on what it does for this set rather than on its raw
+ * stat gain. Purchases already planned are applied first: gear diminishes, so a second point of a stat is worth
+ * less than the first and valuing every step against the original gear would keep overvaluing later ones.
+ *
+ * Scores are cached by the levels the set is wearing, since the greedy search asks about the same combination
+ * repeatedly as it works down the list.
+ */
+export function planUpgrades(items: Item[], player: Player, contentType: contentTypes, baseHPS: number,
+                             userSettings: any, castModel: any, budget: CrestBudget): PlannedPurchase[] {
+  const newPlayer = setupPlayer(player, contentType, castModel);
+  const scores: { [levels: string]: number } = {};
+
+  const scoreAt = (levels: number[]): number => {
+    const key = levels.join("/");
+    if (key in scores) return scores[key];
+
+    // A copy per item, so the player's own gear is never altered by working out what upgrading it would be worth.
+    const raised = items.map((item: any, i: number) => {
+      if (item.level === levels[i]) return item;
+      const copy = item.clone();
+      copy.updateLevel(levels[i], item.missiveStats);
+      return copy;
+    });
+
+    const scored = evalSet(new ItemSet(-1, raised, 0, player.spec), newPlayer, contentType, baseHPS, userSettings,
+                           castModel, false, 0, undefined, undefined, undefined, undefined, true);
+    scores[key] = scored.setHPS || scored.hardScore || 0;
+    return scores[key];
+  };
+
+  // The levels the set would be wearing once everything planned so far is bought.
+  const levelsAfter = (bought: UpgradeStep[]): number[] =>
+    items.map((item) => bought.filter((step) => step.item === item).reduce((level, step) => Math.max(level, step.toLevel), item.level));
+
+  const gainOf = (step: UpgradeStep, bought: UpgradeStep[]): number => {
+    const before = levelsAfter(bought);
+    const after = before.map((level, i) => (items[i] === step.item ? step.toLevel : level));
+    return scoreAt(after) - scoreAt(before);
+  };
+
+  return planCrestSpending(items, budget, gainOf);
+}
+
+/**
+ * A whole run on one thread. The sharded path calls runTopGearShard directly, once per worker, and merges.
+ */
+export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Player, contentType: contentTypes,
+                           baseHPS: number, userSettings: any, castModel: any, reporting: boolean = true,
+                           onProgress?: TopGearProgressCallback): TopGearResult | null {
+  const shard = runTopGearShard(rawItemList, wepCombos, player, contentType, baseHPS, userSettings, castModel, reporting, onProgress);
+  return finishTopGear([shard], player, contentType, castModel);
 }
 
 /**
@@ -312,11 +778,98 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
  * @param {*} rawWepCombos Weapon combos are just a list of all possible weapon combinations (so staves are listed alone, and 1H + OHs are paired).
  * @returns
  */
-function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
+// Rings and trinkets are worn two at a time, so those slots enumerate unordered pairs rather than a full product.
+// The set count reported to the player and the loops that build the sets both go through these, so the bar can't
+// promise a total the build never reaches.
+const ringsCanPair = (a: Item, b: Item) =>
+  a.id !== b.id || a.id === 215130 || b.id === 215130 || a.id === 215137 || b.id === 215137 ||
+  a.id === 215135 || a.id === 240951;
+const trinketsCanPair = (a: Item, b: Item) => a.id !== b.id;
+
+/** The items available in each slot a set draws from. */
+const splitBySlot = (itemList: Item[]) => {
+  const splitItems: { [slot: string]: Item[] } = {};
+  ["Head", "Neck", "Shoulder", "Back", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet", "Finger", "Trinket"]
+    .forEach((slot) => { splitItems[slot] = []; });
+  itemList.forEach((item) => { if (item.slot in splitItems) splitItems[item.slot].push(item); });
+  return splitItems;
+};
+
+/**
+ * How many gear sets a selection produces, without building any of them. Exact: nothing but the ring and trinket
+ * pair rules rejects a combination, so it's the product of the other slots times the valid pairs in those two.
+ */
+export function countGearSets(itemList: Item[], wepCombos: Item[]): number {
+  const splitItems = splitBySlot(itemList);
+  return ["Head", "Shoulder", "Neck", "Back", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet"]
+    .reduce((total, slot) => total * splitItems[slot].length, 1)
+    * wepCombos.length
+    * countPairs(splitItems.Finger, ringsCanPair)
+    * countPairs(splitItems.Trinket, trinketsCanPair);
+}
+
+/**
+ * The most sockets any set can have. Slots are chosen independently, so the largest set is just the best-socketed
+ * item in each slot - no need to build a set to find it.
+ */
+export function maxGearSockets(itemList: Item[], wepCombos: any[]): number {
+  const splitItems = splitBySlot(itemList);
+  const best = (items: Item[], take: number) =>
+    items.map((item) => item.socket || 0).sort((a, b) => b - a).slice(0, take).reduce((sum, n) => sum + n, 0);
+
+  const armour = Object.entries(splitItems).reduce((total, [slot, items]) =>
+    total + best(items, slot === "Finger" || slot === "Trinket" ? 2 : 1), 0);
+  const weapon = wepCombos.reduce((most: number, combo: any) =>
+    Math.max(most, ([] as any[]).concat(combo).reduce((n: number, item: any) => n + ((item && item.socket) || 0), 0)), 0);
+
+  return armour + weapon;
+}
+
+/** How many of the run's sets belong to one shard. */
+export const shardSetCount = (totalSets: number, shard: TopGearShard): number =>
+  Math.floor(totalSets / shard.count) + (shard.index < totalSets % shard.count ? 1 : 0);
+
+/**
+ * Roughly how many evaluations a run will make. Used to decide how many workers to spend on it: a worker costs a
+ * full engine and database initialisation before it does any work, which a small run can never earn back.
+ *
+ * Sockets are taken from the best-socketed item in each slot rather than per set, so this is an estimate. It only
+ * picks a worker count - being out by a factor of two changes how fast the run is, never what it returns.
+ */
+export function estimateEvaluations(itemList: Item[], wepCombos: Item[], userSettings: any, spec: string): number {
+  const sockets = maxGearSockets(itemList, wepCombos);
+  const searchedGems = getGemSearchSpace(userSettings);
+  const variants = Math.min(
+    resolveVariantLimit(userSettings),
+    (searchedGems.length > 1 ? countGemLoadouts(searchedGems.length, Math.max(0, sockets - 1)) : 1)
+      * Math.max(1, countEnchantCombinations(getEnchantSearchSpace(userSettings, spec)))
+      * Math.max(1, countFolioCombinations(userSettings))
+      * Math.max(1, countConsumableCombinations(userSettings)));
+
+  return countGearSets(itemList, wepCombos) * Math.max(1, variants);
+}
+
+const countPairs = (items: Item[], canPair: (a: Item, b: Item) => boolean) => {
+  let pairs = 0;
+  for (let i = 0; i < items.length - 1; i++) {
+    for (let j = i + 1; j < items.length; j++) if (canPair(items[i], items[j])) pairs++;
+  }
+  return pairs;
+};
+
+/**
+ * Walks every wearable gear set, handing each to `onSet` as it is made.
+ *
+ * Nothing is collected. Holding the sets cost about 790 bytes each - fine at a few thousand, but a selection with
+ * millions of combinations exhausted the worker's heap before a single set had been scored. Streaming them means
+ * a set is scored and discarded before the next is built, so memory no longer depends on how big the search is.
+ */
+function forEachGearSet(itemList: Item[], rawWepCombos: Item[], spec: string, onSet: (set: ItemSet) => void,
+                        shard: TopGearShard = WHOLE_RUN): number {
   const wepCombos = deepCopyFunction(rawWepCombos);
  
-  let setCount = 0;
-  let itemSets = [];
+  let setCount = 0;   // Index across the whole run, so shards divide the sets without overlap.
+  let built = 0;      // How many this shard actually made.
   let slotLengths: {[key: string]: number} = {
     Head: 0,
     Neck: 0,
@@ -357,6 +910,11 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
     }
   }
   slotLengths.Weapon = wepCombos.length;
+
+  // A shard builds only its own sets. Every shard still walks the whole combination space - that's just index
+  // arithmetic - but skips assembling the item list, scoring it and allocating an ItemSet for the sets it doesn't
+  // own, which is nearly all of the cost.
+
   for (var head = 0; head < slotLengths.Head; head++) {
     let softScore = { head: splitItems.Head[head].softScore,
                       shoulder: 0,
@@ -412,11 +970,7 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
                             softScore.finger2 = splitItems.Finger[finger2].softScore;
 
                             // Auto-delete sets that have matching ring IDs, unless one of the IDs is Shadowghast Ring in which case we'll allow it.
-                            if (finger < finger2 && 
-                                ((splitItems.Finger[finger].id !== splitItems.Finger[finger2].id) ||
-                                (splitItems.Finger[finger].id === 215130 || splitItems.Finger[finger2].id === 215130) ||
-                                (splitItems.Finger[finger].id === 215137 || splitItems.Finger[finger2].id === 215137) ||
-                                splitItems.Finger[finger].id === 215135 || splitItems.Finger[finger].id === 240951)) {
+                            if (finger < finger2 && ringsCanPair(splitItems.Finger[finger], splitItems.Finger[finger2])) {
 
                               for (var trinket = 0; trinket < slotLengths.Trinket - 1; trinket++) {
                                 softScore.trinket = splitItems.Trinket[trinket].softScore;
@@ -424,28 +978,33 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
                                 for (var trinket2 = 1; trinket2 < slotLengths.Trinket; trinket2++) {
                                   softScore.trinket2 = splitItems.Trinket[trinket2].softScore;
 
-                                  if (splitItems.Trinket[trinket].id !== splitItems.Trinket[trinket2].id && trinket < trinket2) {
-                                    let includedItems = [
-                                      splitItems.Head[head],
-                                      splitItems.Neck[neck],
-                                      splitItems.Shoulder[shoulder],
-                                      splitItems.Back[back],
-                                      splitItems.Chest[chest],
-                                      splitItems.Wrist[wrist],
-                                      splitItems.Hands[hands],
-                                      splitItems.Waist[waist],
-                                      splitItems.Legs[legs],
-                                      splitItems.Feet[feet],
-                                      splitItems.Finger[finger],
-                                      splitItems.Finger[finger2],
-                                      splitItems.Trinket[trinket],
-                                      splitItems.Trinket[trinket2],
-                                      wepCombos[weapon][0]
-                                    ];
-                                    if (wepCombos[weapon].length > 1) includedItems.push(wepCombos[weapon][1])
-                                    //console.log(JSON.stringify(wepCombos[weapon]));
-                                    let sumSoft = sumScore(softScore);
-                                    itemSets.push(new ItemSet(setCount, includedItems, sumSoft, spec));
+                                  if (trinket < trinket2 && trinketsCanPair(splitItems.Trinket[trinket], splitItems.Trinket[trinket2])) {
+                                    // The set's index across the whole run, so ids match an unsharded build and the
+                                    // shards divide the sets between them without overlap or gaps.
+                                    if (setCount % shard.count === shard.index) {
+                                      let includedItems = [
+                                        splitItems.Head[head],
+                                        splitItems.Neck[neck],
+                                        splitItems.Shoulder[shoulder],
+                                        splitItems.Back[back],
+                                        splitItems.Chest[chest],
+                                        splitItems.Wrist[wrist],
+                                        splitItems.Hands[hands],
+                                        splitItems.Waist[waist],
+                                        splitItems.Legs[legs],
+                                        splitItems.Feet[feet],
+                                        splitItems.Finger[finger],
+                                        splitItems.Finger[finger2],
+                                        splitItems.Trinket[trinket],
+                                        splitItems.Trinket[trinket2],
+                                        wepCombos[weapon][0]
+                                      ];
+                                      if (wepCombos[weapon].length > 1) includedItems.push(wepCombos[weapon][1])
+                                      //console.log(JSON.stringify(wepCombos[weapon]));
+                                      let sumSoft = sumScore(softScore);
+                                      onSet(new ItemSet(setCount, includedItems, sumSoft, spec));
+                                      built++;
+                                    }
                                     setCount++;
                                   }
                                 }
@@ -465,7 +1024,7 @@ function createSets(itemList: Item[], rawWepCombos: Item[], spec: string) {
     }
   }
 
-  return itemSets;
+  return built;
 }
 
 function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, contentType: contentTypes, castModelType: string) {
@@ -477,13 +1036,26 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
   let differentials: {
     items: Item[]; //
     gems: number[]; //
-    scoreDifference: number; 
-    rawDifference: number; 
+    scoreDifference: number;
+    rawDifference: number;
+    hps: number;
+    hpsDifference: number;
   } = {
     items: [],
     gems: [],
+    // Enchants and Folio runes an alternative changes. Since sets expand into one candidate per gem, enchant and
+    // rune combination, most close alternatives now differ by one of these and nothing else - and a differential
+    // that only compared items and gems rendered those as an empty row with a score and no explanation.
+    enchants: [] as { slot: string; name: string }[],
+    runes: [] as string[],
     scoreDifference: ((Math.round(primeSet.hardScore - itemSet.hardScore) / primeSet.hardScore) * 100 * modelDiff),
     rawDifference: Math.round(((itemSet.hardScore - primeSet.hardScore) / primeSet.hardScore) * player.getHPS(contentType) * modelDiff),
+
+    // Absolute throughput for this alternative, and the healing it gives up against the best set.
+    // Both are 0 when the spec / content type is scored on stat weights, since no HPS figure exists there.
+    // modelDiff only scales the stat weight path, which is exactly where these stay 0, so the two don't interact.
+    hps: itemSet.setHPS || 0,
+    hpsDifference: Math.round((itemSet.setHPS || 0) - (primeSet.setHPS || 0)),
   };
 
 
@@ -512,14 +1084,32 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
     }
   }
 
-  // Check for gem differences
-  if (primeSet.enchantBreakdown["Gems"] !== itemSet.enchantBreakdown["Gems"]) {
-    itemSet.enchantBreakdown["Gems"].forEach(gem => {
-      if (!(primeSet.enchantBreakdown["Gems"].includes(gem))) {
-        differentials.gems.push(gem);
-      }
-    });
-  }
+  // Check for gem differences. A loadout is a multiset, so two sets can wear the same gems in different numbers -
+  // comparing membership would read "three A one B" against "two A two B" as no difference at all. Count instead,
+  // and report each gem this set wears more of than the best one does.
+  const gemCounts = (gems: number[]) =>
+    gems.reduce((counts: { [gem: number]: number }, gem) => ({ ...counts, [gem]: (counts[gem] || 0) + 1 }), {});
+
+  const primeGemCounts = gemCounts((primeSet.enchantBreakdown["Gems"] as number[]) || []);
+  const diffGemCounts = gemCounts((itemSet.enchantBreakdown["Gems"] as number[]) || []);
+  Object.keys(diffGemCounts).forEach((gem: any) => {
+    if (diffGemCounts[gem] > (primeGemCounts[gem] || 0)) differentials.gems.push(Number(gem));
+  });
+
+  // Check for enchant differences. Every other key in the breakdown is a slot holding one enchant name.
+  Object.keys(itemSet.enchantBreakdown).forEach((slot) => {
+    if (slot === "Gems") return;
+    const chosen = itemSet.enchantBreakdown[slot];
+    if (typeof chosen === "string" && chosen !== primeSet.enchantBreakdown[slot]) {
+      differentials.enchants.push({ slot, name: chosen });
+    }
+  });
+
+  // Check for Omnium Folio differences.
+  const primeRunes: number[] = primeSet.folioGems || [];
+  (itemSet.folioGems || []).forEach((rune: number) => {
+    if (!primeRunes.includes(rune)) differentials.runes.push(getShortName(rune) || String(rune));
+  });
 
   if (diffList.length > primeList.length) {
     differentials.items.push(diffList[diffList.length - 1]);
@@ -541,13 +1131,46 @@ function pruneItems(itemSets: ItemSet[], userSettings: any) {
   return temp.slice(0, softSlice);
 }
 
-function pruneSets(resultSets: any[], userSettings: any) {
-  
-  let temp = resultSets.filter(function (result) {
-    return result.verifySet(userSettings);
-  });
+/**
+ * Collects the best `limit` sets out of a stream without holding on to the rest.
+ *
+ * This picks exactly the sets that sorting every result and slicing the top `limit` used to pick: hardScore is final
+ * the moment evalSet returns and is never touched again, and taking the top N of a stream by a fixed key matches
+ * taking the top N of the fully sorted list - a set is only dropped once `limit` better ones exist, which is just as
+ * true at the end of the run as it was at the time. Sets tied on score can swap places, since the comparator below
+ * never returns 0 and so leaves ties unordered either way.
+ *
+ * Sets are admitted only once they beat the current cut-off, and the buffer is trimmed in batches, so the cost is one
+ * sort of 2*limit per limit admissions rather than a sort per set.
+ */
+export class TopSets {
+  private limit: number;
+  private buffer: any[] = [];
+  private cutoff: number = -Infinity;
 
-  return temp.slice(0, softSlice);
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  add(set: any): void {
+    if (set.hardScore < this.cutoff) return;
+    this.buffer.push(set);
+    if (this.buffer.length >= this.limit * 2) this.trim();
+  }
+
+  /** The kept sets, best first. */
+  toArray(): any[] {
+    this.trim();
+    return this.buffer;
+  }
+
+  private trim(): void {
+    this.buffer.sort((a, b) => (a.hardScore < b.hardScore ? 1 : -1));
+    if (this.buffer.length > this.limit) {
+      this.buffer.length = this.limit;
+      this.cutoff = this.buffer[this.limit - 1].hardScore;
+    }
+  }
 }
 
 
@@ -561,72 +1184,117 @@ function sumScore(obj: any) {
   return sum;
 }
 
-function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string) {
+/**
+ * The enchant the player pinned for a slot, or undefined for Automatic.
+ *
+ * A variant names one enchant per slot. Failing that we take their own selection, using the first entry when they
+ * pinned several but the run isn't expanding variants.
+ */
+function getPinnedEnchant(userSettings: any, slot: string, enchantOverride?: any) {
+  const choices = normaliseEnchantChoices(getGearOption(userSettings, "enchantChoices", null));
+  const forSlot = choices[slot];
+  const chosenId = (enchantOverride && enchantOverride[slot]) || (Array.isArray(forSlot) ? forSlot[0] : forSlot);
+
+  return chosenId && chosenId !== "Automatic" ? getEnchantById(chosenId) : undefined;
+}
+
+/** The enchant a slot ends up with: the player's pick where it's legal, otherwise the spec default. */
+function getSlotEnchant(userSettings: any, slot: string, spec: string, enchantOverride?: any) {
+  const pinned = getPinnedEnchant(userSettings, slot, enchantOverride);
+
+  // A pick that isn't legal on this slot (stale selection after a patch) is ignored rather than dropping the
+  // enchant entirely, which would silently cost the player stats.
+  if (pinned && pinned.slots.includes(enchantSlotSource(slot))) return pinned;
+  return getDefaultEnchant(slot, spec);
+}
+
+// Applies one enchant's stats. Proc enchants are valued at their uptime, which is how the weapon enchants have
+// always been handled. An enchant with no stats of its own (Eyes of the Eagle) grants its budget to the player's
+// best stat instead.
+function applyEnchant(bonus_stats: Stats, enchant: any, highestWeight: string) {
+  if (!enchant) return;
+
+  // An enchant that grants "your highest secondary" rather than a named one is stored against BEST_SECONDARY and
+  // resolved here, since which stat that is depends on the spec being evaluated.
+  const add = (stat: string, amount: number) => {
+    const key = (stat === BEST_SECONDARY ? highestWeight : stat) as keyof Stats;
+    bonus_stats[key] = (bonus_stats[key] || 0) + amount;
+  };
+
+  if (enchant.stats) Object.keys(enchant.stats).forEach((stat) => add(stat, enchant.stats[stat]));
+  if (enchant.procStats) {
+    const uptime = convertPPMToUptime(WEAPON_ENCHANT_PPM, WEAPON_ENCHANT_DURATION);
+    Object.keys(enchant.procStats).forEach((stat) => add(stat, enchant.procStats[stat] * uptime));
+  }
+  if (enchant.manaPerc) bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * enchant.manaPerc;
+}
+
+/**
+ * The enchants the set's items came in wearing, by slot.
+ *
+ * Only enchants carrying an enchantID can be recognised, so anything else is simply absent and the slot resolves
+ * normally. Rings are numbered by the order they appear, matching how the report labels them.
+ */
+function wornEnchants(itemList: any[]): { [slot: string]: any } {
+  const worn: { [slot: string]: any } = {};
+  let ringsSeen = 0;
+
+  (itemList || []).forEach((item: any) => {
+    const isRing = item.slot === "Finger";
+    // Counted for every ring, enchanted or not, so the second ring is still Finger2 when the first has nothing on.
+    const slot = isRing ? "Finger" + ++ringsSeen : (String(item.slot).includes("Weapon") ? "CombinedWeapon" : item.slot);
+
+    const enchant = getEnchantByEnchantID(item.enchantID || 0);
+    if (enchant && !worn[slot]) worn[slot] = enchant;
+  });
+
+  return worn;
+}
+
+function enchantItems(bonus_stats: Stats, setStats: Stats, castModel: any, contentType: contentTypes, spec: string, userSettings: any = {}, enchantOverride?: any, itemList: any[] = []) {
   let enchants: {[key: string]: string | number | number[]} = {}; // TODO: Cleanup
-  // Rings - Best secondary.
-  // We use the players highest stat weight here. Using an adjusted weight could be more accurate, but the difference is likely to be the smallest fraction of a
-  // single percentage. The stress this could cause a player is likely not worth the optimization.
-  let highestWeight = getHighestWeight(castModel);
+  // With "replace what I've enchanted" off, a slot that already has an enchant keeps it and the engine only
+  // decides the empty ones. Unmodelled enchants are recognised too, so a weapon carrying one is left alone
+  // rather than being quietly re-enchanted.
+  const worn = keepsExistingGear(userSettings) ? wornEnchants(itemList) : {};
 
-  bonus_stats[highestWeight as keyof typeof bonus_stats] = (bonus_stats[highestWeight as keyof typeof bonus_stats] || 0) +  29; // 64 x 2.
-  let ringEnchantName = "";
+  // Rings. Every ring enchant grants the same amount, so Automatic picks the one matching the player's best stat.
+  // We use the highest stat weight rather than an adjusted weight - the difference is a fraction of a percent and
+  // isn't worth the extra churn in what the player is told to enchant.
+  const highestWeight = getHighestWeight(castModel);
 
-  if (spec === "Holy Priest" || spec === "Restoration Shaman") ringEnchantName = "Eyes of the Eagle";
-  else if (highestWeight === "haste") ringEnchantName = "Silvermoon's Alacrity";
-  else if (highestWeight === "crit") ringEnchantName = "Nature's Fury";
-  else if (highestWeight === "mastery") ringEnchantName = "Zul'jin's Mastery";
-  else if (highestWeight === "versatility") ringEnchantName = "Silvermoon's Tenacity";
-  enchants["Finger"] = ringEnchantName;
+  // A set wears two rings and each is enchanted on its own, so they're resolved and applied separately. Running
+  // the same enchant on both is just the case where the two happen to agree, and it lands twice as it should.
+  // Splitting them matters because secondaries diminish: 29 crit and 29 haste can beat 58 of either.
+  RING_SLOTS.forEach((slot) => {
+    let ringEnchant = worn[slot] || getPinnedEnchant(userSettings, slot, enchantOverride);
+    if (!ringEnchant || !ringEnchant.slots.includes("Finger")) {
+      // Automatic: Eyes of the Eagle where the spec uses it, otherwise the enchant matching their best stat.
+      ringEnchant = getDefaultEnchant(slot, spec) ||
+        getEnchantsForSlot(slot, spec).find((e) => e.stats && highestWeight in e.stats);
+      if (spec !== "Holy Priest" && spec !== "Restoration Shaman") {
+        ringEnchant = getEnchantsForSlot(slot, spec).find((e) => e.stats && highestWeight in e.stats) || ringEnchant;
+      }
+    }
+    applyEnchant(bonus_stats, ringEnchant, highestWeight);
+    enchants[slot] = ringEnchant ? ringEnchant.name : "";
+  });
 
+  // Armour slots. One entry each today, but they read from the DB so adding options is a data change.
+  ["Head", "Chest", "Shoulder", "Legs", "Feet"].forEach((slot) => {
+    const enchant = worn[slot] || getSlotEnchant(userSettings, slot, spec, enchantOverride);
+    applyEnchant(bonus_stats, enchant, highestWeight);
+    enchants[slot] = enchant ? enchant.name : "";
+  });
 
-  // Helm
-  bonus_stats.leech = (bonus_stats.leech || 0) + 55;
-  enchants["Head"] = "Empowered Hex of Leeching";
-
-  // Chest
-  // There is a mana option too that we might include later.
-  if (spec === "Restoration Shaman") {
-    bonus_stats.intellect = (bonus_stats.intellect || 0) + 40;
-    bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * 1.05; 
-    enchants["Chest"] = "Mark of the Magister";
-  }
-  else {
-    bonus_stats.intellect = (bonus_stats.intellect || 0) + 50; 
-    enchants["Chest"] = "Mark of the Worldsoul";
-  }
-
-
-  // Shoulders
-  bonus_stats.leech = (bonus_stats.leech || 0) + 166;
-  enchants["Shoulder"] = "Silvermoon's Mending";
-
-  // Legs - Also gives 3/4/5% mana.
-  bonus_stats.intellect += 41;
-  bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * 1.04;
-  enchants["Legs"] = "Arcanoweave Spellthread";
-
-  // Boots
-  bonus_stats.leech = (bonus_stats.leech || 0) + 28;
-  enchants["Feet"] = "Shaladrassil's Roots";
-
-
-  // Weapon - Acuity of the Ren'dorei. Should add a setting for secondary enchants too.
-  let wepEnchantName = "Acuity of the Ren'dorei"
-  if (spec === "Discipline Priest" || spec === "Restoration Druid") {
-    wepEnchantName = "Berserker's Rage";
-    bonus_stats.haste = (bonus_stats.mastery || 0) + 124 * convertPPMToUptime(3, 15);
-  }
-  else if (spec === "Preservation Evoker") {
-    wepEnchantName = "Arcane Mastery";
-    bonus_stats.mastery = (bonus_stats.mastery || 0) + 124 * convertPPMToUptime(3, 15);
-  }
-  else {
-    bonus_stats.intellect += 67 * convertPPMToUptime(3, 15);
-  }
-  
-  enchants["CombinedWeapon"] = wepEnchantName; 
-  enchants["2H Weapon"] = wepEnchantName; 
-  enchants["1H Weapon"] = wepEnchantName; 
+  // Weapon. Automatic keeps the per-spec default; the secondary enchants are budgeted higher than the intellect
+  // one, so this is a real choice rather than a cosmetic one.
+  const weaponEnchant = worn["CombinedWeapon"] || getSlotEnchant(userSettings, "CombinedWeapon", spec, enchantOverride);
+  applyEnchant(bonus_stats, weaponEnchant, highestWeight);
+  const wepEnchantName = weaponEnchant ? weaponEnchant.name : "";
+  enchants["CombinedWeapon"] = wepEnchantName;
+  enchants["2H Weapon"] = wepEnchantName;
+  enchants["1H Weapon"] = wepEnchantName;
 
   return enchants;
 }
@@ -679,7 +1347,7 @@ export function getTopGearGems(gemID: number, gemCount: number, bonus_stats: Sta
  * @param {*} castModel
  * @returns 
  */
-function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number) {
+function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes, baseHPS: number, userSettings: any, castModel: any, reporting: boolean = false, gemID?: number, gemLoadout?: number[], enchantOverride?: any, folioOverride?: any, consumableOverride?: any, keepEquippedGems: boolean = false) {
   // == Setup ==
     const statBreakdown = {
     gear: {},
@@ -743,7 +1411,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
 
 
   // == Enchants and gems ==
-  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec);
+  const enchants = enchantItems(enchantStats, setStats, castModel, contentType, player.spec, userSettings, enchantOverride, builtSet.itemList);
   compileStats(bonus_stats, enchantStats);
   statBreakdown.enchants = enchantStats;
   
@@ -751,19 +1419,23 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   // ==== Consumables ====
   // =====================
   const consumableStats: Stats = {};
+  // The player's highest weighted secondary. Both the automatic flask and the secondary-stat foods follow it.
+  const bestSecondary = getHighestWeight(castModel);
   // == Flask ==
   let selectedChoice = "";
-  if (getSetting(userSettings, "flaskChoice") === "Automatic") {
-    const bestStat = getHighestWeight(castModel);
-
-    if ((setStats[bestStat] + bonus_stats[bestStat]) > 28000) {
+  // getSetting returns 0 when the setting is missing (stale local storage, an engine test that passes a partial
+  // settings object), so treat anything that isn't a usable string as Automatic rather than crashing the whole run.
+  // A variant's flask wins, then a single pinned flask, then the settings panel's own dropdown.
+  const flaskChoice = getChosenConsumable(userSettings, "flask", consumableOverride) || getSetting(userSettings, "flaskChoice");
+  if (typeof flaskChoice !== "string" || !flaskChoice || flaskChoice === "Automatic") {
+    if ((setStats[bestSecondary] + bonus_stats[bestSecondary]) > 28000) {
       // We are in second DR already, try and swap. Currently unused.
     }
-    consumableStats[bestStat] = (consumableStats[bestStat] || 0) + 165;
-    selectedChoice = bestStat;
+    consumableStats[bestSecondary] = (consumableStats[bestSecondary] || 0) + 165;
+    selectedChoice = bestSecondary;
   }
   else {
-    selectedChoice = getSetting(userSettings, "flaskChoice").toLowerCase();
+    selectedChoice = flaskChoice.toLowerCase();
     consumableStats[selectedChoice]  = (consumableStats[selectedChoice] || 0) + 165;
   }
 
@@ -772,16 +1444,30 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   else if (selectedChoice === "crit") enchants.flask = "Flask of the Shattered Sun";
   else if (selectedChoice === "versatility") enchants.flask = "Flask of Thalassian Resistance";
 
-  // Food buff
-  consumableStats.intellect = (consumableStats.intellect ?? 0) + 50;
+  // Food buff. See FOOD_BUFFS for what each one grants.
+  const foodChoice = getChosenConsumable(userSettings, "food", consumableOverride) || getSetting(userSettings, "foodBuff");
+  if (foodChoice !== "None") {
+    // An unrecognised food (stale local storage) falls back to the plain intellect food, which is what every
+    // profile got before there was more than one, rather than silently costing the player the buff entirely.
+    const foodName = FOOD_BUFFS[foodChoice] ? foodChoice : "Intellect Food";
+    const food = FOOD_BUFFS[foodName];
+    const stat = food.stat === "bestSecondary" ? bestSecondary : food.stat;
+
+    consumableStats[stat] = (consumableStats[stat] ?? 0) + food.amount;
+    enchants.food = foodName;
+  }
 
   // Weapon Oil
-  consumableStats.haste = (consumableStats.haste ?? 0) + 15;
-  consumableStats.crit = (consumableStats.crit ?? 0) + 15;
+  if (getSetting(userSettings, "weaponOil") !== false) {
+    consumableStats.haste = (consumableStats.haste ?? 0) + 15;
+    consumableStats.crit = (consumableStats.crit ?? 0) + 15;
+    enchants.oil = "Weapon Oil";
+  }
 
-  // Vantus Rune
-  if (contentType === "Raid") {
+  // Vantus Rune. Raid only, and only if the player actually uses one.
+  if (contentType === "Raid" && getSetting(userSettings, "vantusRune") !== false) {
     consumableStats.versatility = (consumableStats.versatility ?? 0) + 162;
+    enchants.rune = "Vantus Rune";
   }
 
   statBreakdown.consumables = consumableStats;  
@@ -795,7 +1481,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
     
   }
   else {
-    enchants["Gems"] = getMidnightGemOptions(player.spec, contentType, userSettings).slice(0, Math.max(0, builtSet.setSockets));
+    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings, gemLoadout, keepEquippedGems);
     const gemStats = getGemStats(enchants["Gems"]);
     statBreakdown.gems = gemStats;
 
@@ -868,29 +1554,20 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   }
 
 
-  // Omnium Folio
-  // Handle user entry / unlocks later.
-  const folioGems = [1279599, 1279603, 1287555]
-  const bestStat = getHighestWeight(castModel);
-  switch (bestStat) {
-    case "haste":
-      folioGems.push(1287774);
-      break;
-    case "crit":
-      folioGems.push(1279609);
-      break;
-    case "mastery":
-      folioGems.push(1287771);
-      break;
-    case "versatility":
-      folioGems.push(1279613);
-      break;
-  }
-  folioGems.push(1279614)
+  // Omnium Folio. Slots 1, 4 and 5 are selectable; anything left on Automatic resolves to the rune the engine
+  // used to hardcode, so an untouched profile produces an identical set. When several runes are pinned for a slot
+  // the run is expanded into variants and each one arrives here as a folioOverride.
+  const folioGems = getFolioGems(userSettings, getHighestWeight(castModel), folioOverride, player.folioRunes);
 
 
   const folioStats = getFolioEffect(folioGems, {player: player, contentType: contentType, settings: userSettings, setStats: setStats, castModel: castModel, setVariables: setVariables});
   builtSet.folioGems = folioGems;
+  // The runes the player would have had without touching anything. SimC doesn't report the Folio, so this is the
+  // only "before" there is - the report marks the slots that differ from it and leaves the rest unmarked.
+  // The "before" the report diffs against: the runes the character actually has where we can read them, and the
+  // automatic pick for the slots we can't.
+  builtSet.folioAuto = getFolioGems({}, getHighestWeight(castModel), undefined, player.folioRunes)
+    .map((auto: number, slot: number) => (player.folioRunes || {})[slot + 1] || auto);
   effectStats.push(folioStats);
 
   // Special 10.0.7 Ring
@@ -1096,6 +1773,17 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   }
 
   builtSet.hardScore = Math.round(1000 * hardScore) / 1000;
+
+  // == Absolute Throughput ==
+  // hardScore is an intellect-equivalent ranking number and can't be shown to the player as healing. Where the set
+  // was run through a cast model or a ramp sim though, setStats.hps is a genuine HPS figure we can report directly.
+  // On the stat weight path setStats.hps only holds flat HPS granted by effects, which is not the player's total
+  // healing, so we leave this at 0 rather than report a misleading number.
+  const evaluationPath = castModel.modelType[contentType];
+  builtSet.setHPS = (evaluationPath === MODEL_TYPES.CAST_MODEL || evaluationPath === MODEL_TYPES.SEQUENCES)
+                      ? Math.round(setStats.hps || 0)
+                      : 0;
+
   builtSet.setStats = setStats;
   builtSet.enchantBreakdown = enchants;
   builtSet.gemBreakdown = JSON.stringify(enchants["Gems"] || []);
@@ -1348,6 +2036,7 @@ function evalSetOld(itemSet, player, contentType, baseHPS, userSettings, castMod
   }
 
   builtSet.hardScore = Math.round(1000 * hardScore) / 1000;
+
   builtSet.setStats = setStats;
   builtSet.enchantBreakdown = enchants;
   return builtSet; // Temp

@@ -6,6 +6,15 @@ import { useSelector } from "react-redux";
 import WowheadTooltip from "General/Modules/GeneralComponents/WHTooltips.tsx";
 import { reforgeIDs } from "Databases/ReforgeDB";
 
+// Enchant and rune swaps have no icon to show, so they're named instead. Sized to sit level with the item icons.
+const swapChipStyle = {
+  height: 42, minWidth: 76, padding: "2px 6px", borderRadius: 4, fontSize: 11, lineHeight: "13px",
+  border: "1px solid rgba(255,255,255,0.18)", backgroundColor: "rgba(0,0,0,0.35)",
+  display: "flex", flexDirection: "column", justifyContent: "center",
+};
+
+const SWAP_SLOT_LABELS = { CombinedWeapon: "Weapon", Finger1: "Ring 1", Finger2: "Ring 2" };
+
 function CompetitiveAlternatives(props) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.language;
@@ -55,6 +64,24 @@ function CompetitiveAlternatives(props) {
     let diff = (Math.round(value * power) / power) * -1;
     if (Math.abs(diff) < 0.01) return "<0.01";
     return Math.abs(diff);
+  };
+
+  /* ------------------------------------ Alternative Set Value ----------------------------------- */
+  // Where the spec is evaluated through a cast model we have a real HPS figure for every alternative, so show the
+  // absolute throughput of the set alongside the healing and percentage it gives up. When the percentage can be
+  // derived from HPS we use that rather than the score difference, since it's the same quantity being reported.
+  // Otherwise fall back to the relative score difference, which is all the stat weight path can honestly tell us.
+  const getSetValueText = (differential) => {
+    if (differential.hps > 0) {
+      const lost = Math.round(differential.hpsDifference || 0);
+      const primeHPS = differential.hps - lost; // the best set's HPS
+      const percent = primeHPS > 0 ? (lost / primeHPS) * 100 : 0;
+      const percentText = Math.abs(percent) < 0.01 ? "<0.01%" : (Math.round(percent * 100) / 100) + "%";
+
+      return Math.round(differential.hps).toLocaleString() + " HPS (" +
+             (lost >= 0 ? "+" : "-") + Math.abs(lost).toLocaleString() + ", " + percentText + ")";
+    }
+    return (gameType === "Classic" ? Math.round(differential.rawDifference / 60) : differential.rawDifference) + " (" + roundTo(differential.scoreDifference, 2) + "%)";
   };
 
   return (
@@ -109,6 +136,24 @@ function CompetitiveAlternatives(props) {
                             </Grid>
                           ));
                         })}
+                        {/* Enchants and Folio runes an alternative swaps. Most close alternatives differ only by
+                            one of these, and without them the row renders as a bare score with nothing to compare. */}
+                        {(key.enchants || []).map((enchant, i) => (
+                          <Grid item key={"enchant" + i}>
+                            <div style={swapChipStyle}>
+                              <span style={{ color: "rgba(255,255,255,0.45)" }}>{SWAP_SLOT_LABELS[enchant.slot] || enchant.slot}</span>
+                              <div style={{ color: "#8ab4f8" }}>{enchant.name}</div>
+                            </div>
+                          </Grid>
+                        ))}
+                        {(key.runes || []).map((rune, i) => (
+                          <Grid item key={"rune" + i}>
+                            <div style={swapChipStyle}>
+                              <span style={{ color: "rgba(255,255,255,0.45)" }}>Folio</span>
+                              <div style={{ color: "#d8a657" }}>{rune}</div>
+                            </div>
+                          </Grid>
+                        ))}
                         {key.gems.map((gem, i) => {
                           let itemArray = [];
                           // 
@@ -165,7 +210,7 @@ function CompetitiveAlternatives(props) {
                               width: "100%",
                             }}
                           >
-                            {(gameType === "Classic" ? Math.round(key.rawDifference / 60) : key.rawDifference) + " HPS (" + roundTo(key.scoreDifference, 2) + "%)"}
+                            {getSetValueText(key)}
                           </Typography>
                         </Grid>
                       </Grid>

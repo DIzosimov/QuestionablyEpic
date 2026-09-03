@@ -8,6 +8,26 @@ type GemEntry = {
     stats: { [key: string]: number };
   }
 
+// The current tier's stat gems grant this split: the major stat at GEM_MAJOR_STAT, the minor at GEM_MINOR_STAT.
+// The rows below use these rather than repeating the numbers, so a tier update is one edit and the engine's gem
+// lookup can't drift out of step with the data it's searching.
+export const GEM_MAJOR_STAT = 16;
+export const GEM_MINOR_STAT = 7;
+// The single-stat gems put the lot into one stat. Worth more than a hybrid's major stat, so they win outright
+// whenever one stat is far enough ahead of the others to be worth giving up the split for.
+export const GEM_SOLO_STAT = 17;
+
+// Current-expansion gems. Metas are kept apart from the stat gems because they aren't interchangeable with them:
+// a set has exactly one meta socket, and it's the only socket a meta can go in.
+const isCurrentGem = (gem: GemEntry) => gem.id >= 240000 && gem.id < 250000;
+export const isMetaGem = (gem: GemEntry) => gem.element === "Meta" || gem.name.includes("Diamond");
+
+// GemDB has a couple of duplicated rows, so de-dupe before either list is offered to the player or searched.
+const uniqueById = (gems: GemEntry[]) => gems.filter((gem, i) => gems.findIndex((other) => other.id === gem.id) === i);
+
+export const getCurrentStatGems = (): GemEntry[] => uniqueById(gemDB.filter((gem) => isCurrentGem(gem) && !isMetaGem(gem)));
+export const getCurrentMetaGems = (): GemEntry[] => uniqueById(gemDB.filter((gem) => isCurrentGem(gem) && isMetaGem(gem)));
+
 export const gemDB: GemEntry[] = [
     {
       id: 240969,
@@ -28,98 +48,112 @@ export const gemDB: GemEntry[] = [
       element: "Lapis",
       name: "Flawless Deadly Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_blue",
-      stats: { versatility: 12, crit: 5 },
+      stats: { versatility: GEM_MAJOR_STAT, crit: GEM_MINOR_STAT },
     },
     {
       id: 240918,
       element: "Lapis",
       name: "Flawless Masterful Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_blue",
-      stats: { versatility: 12, mastery: 5 },
+      stats: { versatility: GEM_MAJOR_STAT, mastery: GEM_MINOR_STAT },
     },
     {
       id: 240916,
       element: "Lapis",
       name: "Flawless Quick Lapis",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_blue",
-      stats: { versatility: 12, haste: 5 },
+      stats: { versatility: GEM_MAJOR_STAT, haste: GEM_MINOR_STAT },
     },
     {
       id: 240910,
       element: "Garnet",
       name: "Flawless Versatile Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_red",
-      stats: { crit: 12, versatility: 5 },
+      stats: { crit: GEM_MAJOR_STAT, versatility: GEM_MINOR_STAT },
     },
     {
       id: 240906,
       element: "Garnet",
       name: "Flawless Quick Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_red",
-      stats: { crit: 12, haste: 5 },
+      stats: { crit: GEM_MAJOR_STAT, haste: GEM_MINOR_STAT },
     },
     {
       id: 240908,
       element: "Garnet",
       name: "Flawless Masterful Garnet",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_red",
-      stats: { crit: 12, mastery: 5 },
+      stats: { crit: GEM_MAJOR_STAT, mastery: GEM_MINOR_STAT },
     },
     {
       id: 240902,
       element: "Amethyst",
       name: "Flawless Versatile Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_purple",
-      stats: { mastery: 12, versatility: 5 },
-    },
-    {
-      id: 240902,
-      element: "Amethyst",
-      name: "Flawless Versatile Amethyst",
-      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_purple",
-      stats: { mastery: 12, versatility: 5 },
+      stats: { mastery: GEM_MAJOR_STAT, versatility: GEM_MINOR_STAT },
     },
     {
       id: 240900,
       element: "Amethyst",
       name: "Flawless Quick Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_purple",
-      stats: { mastery: 12, haste: 5 },
+      stats: { mastery: GEM_MAJOR_STAT, haste: GEM_MINOR_STAT },
     },
     {
       id: 240898,
       element: "Amethyst",
       name: "Flawless Deadly Amethyst",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_purple",
-      stats: { mastery: 12, crit: 5 },
+      stats: { mastery: GEM_MAJOR_STAT, crit: GEM_MINOR_STAT },
     },
     {
       id: 240894,
       element: "Peridot",
       name: "Flawless Versatile Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_frost_green",
-      stats: { haste: 12, versatility: 5 },
+      stats: { haste: GEM_MAJOR_STAT, versatility: GEM_MINOR_STAT },
     },
      {
       id: 240892,
       element: "Peridot",
       name: "Flawless Masterful Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_green",
-      stats: { haste: 12, mastery: 5 },
-    },
-        {
-      id: 240892,
-      element: "Peridot",
-      name: "Flawless Masterful Peridot",
-      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_green",
-      stats: { haste: 12, mastery: 5 },
+      stats: { haste: GEM_MAJOR_STAT, mastery: GEM_MINOR_STAT },
     },
       {
       id: 240890,
       element: "Peridot",
       name: "Flawless Deadly Peridot",
       icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_green",
-      stats: { haste: 12, crit: 5 },
+      stats: { haste: GEM_MAJOR_STAT, crit: GEM_MINOR_STAT },
+    },
+    {
+      id: 240888,
+      element: "Peridot",
+      name: "Flawless Quick Peridot",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_nature_green",
+      stats: { haste: GEM_SOLO_STAT },
+    },
+    {
+      id: 240896,
+      element: "Amethyst",
+      name: "Flawless Masterful Amethyst",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_void_purple",
+      stats: { mastery: GEM_SOLO_STAT },
+    },
+    {
+      id: 240904,
+      element: "Garnet",
+      name: "Flawless Deadly Garnet",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_fire_red",
+      stats: { crit: GEM_SOLO_STAT },
+    },
+    {
+      id: 240912,
+      element: "Lapis",
+      name: "Flawless Versatile Lapis",
+      icon: "inv_12_profession_jewelcrafting_rare_gem_cut_holy_blue",
+      stats: { versatility: GEM_SOLO_STAT },
     },
     {
       id: 213488,

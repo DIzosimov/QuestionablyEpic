@@ -6,15 +6,17 @@ import "./../QuickCompare/QuickCompare.css";
 import { useTranslation } from "react-i18next";
 // import { testTrinkets } from "../Engine/EffectFormulas/Generic/TrinketEffectFormulas";
 import { apiSendTopGearSet } from "../SetupAndMenus/ConnectionUtilities";
-import { Button, Grid, Typography, Divider, Snackbar, SnackbarCloseReason } from "@mui/material";
+import { Button, Grid, Typography, Divider, Snackbar, SnackbarCloseReason, LinearProgress } from "@mui/material";
 import MuiAlert from "@mui/material/Alert";
-import { buildNewWepCombos } from "../../Engine/ItemUtilities";
+import { buildNewWepCombos, getForcedEmbellishmentCount, MAX_EMBELLISHMENTS } from "../../Engine/ItemUtilities";
 import MiniItemCard from "./MiniItemCard";
 import { useHistory } from "react-router-dom";
 import HelpText from "../SetupAndMenus/HelpText";
 import { CONSTRAINTS } from "../../Engine/CONSTRAINTS";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import ItemBar from "../ItemBar/ItemBar";
+import GearOptionsSelector from "./GearOptionsSelector";
+import { togglePlayerSettings } from "Redux/Actions";
 import CharacterPanel from "../CharacterPanel/CharacterPanel";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTranslatedSlotName } from "locale/slotsLocale";
@@ -23,10 +25,13 @@ import { RootState } from "Redux/Reducers/RootReducer";
 import { Item } from "General/Items/Item";
 import {Player } from "General/Modules/Player/Player";
 import { TopGearResult } from "General/Modules/TopGear/Engine/TopGearResult";
+import { TopGearProgress, estimateEvaluations } from "./Engine/TopGearEngine";
+import { aggregateShardProgress } from "./Engine/ShardProgress";
 import TopGearReforgePanel from "./TopGearReforgePanel";
 import { getSetting } from "Retail/Engine/EffectFormulas/EffectUtilities";
 import { prepareTopGear } from "./Engine/TopGearEngineClassic";
-import { buildDifferential, generateReportCode, createTopGearWorker } from "./Engine/TopGearEngineShared";
+import { buildDifferential, generateReportCode } from "./Engine/TopGearEngineShared";
+import { createTopGearWorker } from "./Engine/TopGearWorkerFactory";
 import { trackPageView } from "Analytics";
 import { getVersion } from "../ChangeLog/Log";
 
@@ -36,6 +41,11 @@ type ShortReport = {
   effectList: any[]; // TODO: Replace with proper Effect array.
   differentials: any[]; // TODO: Replace with Differentials.
   contentType: string; // TODO: Replace with contentTypes
+  embellishedSelected?: number; // Drives the "only two embellishments can be worn" note in the report.
+  equippedHPS?: number; // Throughput of the player's current gear, for the upgrade percentage.
+  // What to spend crests on, in the order to spend it. Absent unless the player asked for it.
+  crestPlan?: { id: number; slot: string; fromLevel: number; toLevel: number; crest: string; crests: number;
+                gain: number; spent: { [currencyID: number]: number } }[];
   itemSet: {
     itemList: any[]; // TODO: Replace with Item
     setStats: any; // TODO: Replace with nice stat object.
@@ -52,6 +62,83 @@ type ShortReport = {
   }
 }
 
+/**
+ * The run's progress bar, deliberately kept apart from the page.
+ *
+ * Progress arrives about a hundred times per worker per stage. Holding it in TopGear's own state meant every
+ * update re-rendered the item bar, the character panel and the gear options panel - and the last of those
+ * recomputes the whole enchant and gem search space to project its combination count. Ten of those a second, on
+ * the one thread the workers are already competing with for cores, is the run paying for its own progress bar.
+ *
+ * The parent pushes updates in through the ref instead, so a report repaints this bar and nothing else.
+ */
+const formatRemaining = (ms: number) => {
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return `~${seconds}s left`;
+  return `~${Math.floor(seconds / 60)}m ${seconds % 60}s left`;
+};
+
+export type ProgressHandle = { update: (p: TopGearProgress) => void; clear: () => void };
+
+const RunProgress = React.forwardRef<ProgressHandle, {}>((_props, ref) => {
+  const [progress, setProgress] = useState<TopGearProgress | null>(null);
+  const lastProgressAt = React.useRef(0);
+  const currentStage = React.useRef("");
+  const stageStartedAt = React.useRef(0);
+
+  React.useImperativeHandle(ref, () => ({
+    /**
+     * Takes a progress report, at most ten times a second.
+     *
+     * The engine reports about a hundred times per stage regardless of length - fine over a minute, but on a short
+     * run those land milliseconds apart. Throttling by time rather than by count is what keeps a small run small.
+     * The final report is always taken so the bar can't freeze short.
+     */
+    update: (incoming: TopGearProgress) => {
+      const finished = incoming.total > 0 && incoming.done >= incoming.total;
+      const now = performance.now();
+      if (!finished && now - lastProgressAt.current < 100) return;
+
+      // Each stage counts something different, so the estimate restarts with it. Carrying the run's elapsed time
+      // into a stage that has only just begun reads as hours remaining for the first few updates.
+      if (incoming.stage !== currentStage.current) {
+        currentStage.current = incoming.stage;
+        stageStartedAt.current = now;
+      }
+
+      lastProgressAt.current = now;
+      setProgress(incoming);
+    },
+    clear: () => {
+      lastProgressAt.current = 0;
+      currentStage.current = "";
+      stageStartedAt.current = performance.now();
+      setProgress(null);
+    },
+  }));
+
+  if (!progress) return null;
+  const { stage, done, total } = progress;
+  // Both stages report a real total; only the moment before the set count is known runs indeterminate.
+  const measured = total > 0;
+  const percent = measured ? Math.min(100, (done / total) * 100) : 0;
+
+  const elapsed = performance.now() - stageStartedAt.current;
+  // Wait for a second of real work before estimating - before that the rate is mostly startup noise.
+  const remaining = measured && done > 0 && elapsed > 1000 ? (elapsed / done) * (total - done) : 0;
+
+  return (
+    <div style={{ width: 300 }}>
+      <Typography variant="caption" style={{ color: "rgba(255,255,255,0.8)", display: "block" }}>
+        {stage}
+        {measured ? ` — ${done.toLocaleString()} / ${total.toLocaleString()} (${Math.round(percent)}%)` : ""}
+        {remaining > 0 ? ` · ${formatRemaining(remaining)}` : ""}
+      </Typography>
+      <LinearProgress variant={measured ? "determinate" : "indeterminate"} value={percent} style={{ height: 6, borderRadius: 3 }} />
+    </div>
+  );
+});
+
 interface ReportItem {
   id: number;
   level: number;
@@ -63,6 +150,9 @@ interface ReportItem {
   exclusiveItem?: boolean;
   quality?: number;
   effect?: any;
+  // The gems the item was wearing in game, so the report can mark the ones Top Gear wants changed.
+  gemString?: string;
+  enchantID?: number;
 }
 
 declare module '@mui/material/styles' {
@@ -167,9 +257,33 @@ export default function TopGear(props: any) {
   const [openDelete, setOpenDelete] = useState(false);
 
   const [activeSlot, setSlot] = useState("");
+
+  // Gem / enchant / Folio selection writes straight into playerSettings, the same store the engine reads from.
+  const settingsDispatch = useDispatch();
+  const updateGearOption = (key: string, value: any) => {
+    const updated: any = { ...playerSettings };
+    if (updated[key]) updated[key] = { ...updated[key], value: value };
+    settingsDispatch(togglePlayerSettings(updated));
+  };
   /* ------------ itemList isn't used for anything here other than to trigger rerenders ----------- */
   const [itemList, setItemList] = useState(props.player.getActiveItems(activeSlot));
   const [btnActive, setBtnActive] = useState<boolean>(true);
+  // Where the running engine has got to. Null whenever a run isn't in flight, which is what hides the bar.
+  const runStartedAt = React.useRef(0); // When the whole run began.
+  // The bar keeps its own state, so reporting progress repaints it without re-rendering this page.
+  const progressBar = React.useRef<ProgressHandle>(null);
+
+  const receiveProgress = (update: TopGearProgress) => progressBar.current?.update(update);
+
+  // Each shard only knows about its own slice, so the bar adds them up. Shards count different things in different
+  // stages, so only those in the same stage are summed - the run is as far along as its slowest worker, and mixing
+  // a shard's set count into another's evaluation count would make the total meaningless.
+  const shardProgress = React.useRef<TopGearProgress[]>([]);
+  const receiveShardProgress = (index: number) => (update: TopGearProgress) => {
+    shardProgress.current[index] = update;
+    const combined = aggregateShardProgress(shardProgress.current);
+    if (combined) receiveProgress(combined);
+  };
   
   const [errorMessage, setErrorMessage] = useState("");
   const patronStatus: string = props.patronStatus;
@@ -186,6 +300,14 @@ export default function TopGear(props: any) {
   const embellishItem = (item: Item, embellishmentName: string) => {
     let player = props.player;
     player.embellishItem(item, embellishmentName);
+    setItemList([...player.getActiveItems(activeSlot)]);
+  }
+
+  // Adds a copy of a crafted item made with a different pair of secondaries, so both can be compared rather than
+  // rebuilding the item in the add form to try one.
+  const recraftItem = (item: Item, missives: string) => {
+    let player = props.player;
+    player.recraftItem(item, missives);
     setItemList([...player.getActiveItems(activeSlot)]);
   }
 
@@ -383,9 +505,17 @@ export default function TopGear(props: any) {
 
       return errorMessage.slice(0, -2);
     }
-    else {
-      return "";
+
+    /* ------------------------------------ Embellishment cap ------------------------------------- */
+    // Only two embellishments can be worn at once. If three or more slots have nothing but embellished items
+    // selected then no wearable set exists, Top Gear discards every set it builds, and the player gets an empty
+    // report with no explanation. Say so on the selection screen instead.
+    const forcedEmbellishments = getForcedEmbellishmentCount(props.player.getSelectedItems());
+    if (forcedEmbellishments > MAX_EMBELLISHMENTS) {
+      return "Too many embellishments (" + forcedEmbellishments + "/" + MAX_EMBELLISHMENTS + "). Add a non-embellished option to one of those slots.";
     }
+
+    return "";
   }
 
   useEffect(() => {
@@ -420,6 +550,41 @@ export default function TopGear(props: any) {
     // handleClickDelete();
   };
 
+  /**
+   * What to spend crests on, for the set the run settled on.
+   *
+   * Planned against the player's own Item objects rather than the report's copies: those have been through
+   * postMessage and lost the methods needed to work out what raising them would be worth. They're matched back by
+   * uniqueHash, the same way shortenReport unfolds weapons.
+   *
+   * Only the fields the report draws are kept, so a saved report doesn't carry a copy of every item again.
+   */
+  const planCrests = async (result: TopGearResult, contentType: contentTypes, baseHPS: number) => {
+    const on = playerSettings.crestSpending && (playerSettings.crestSpending.value === true || playerSettings.crestSpending.value === "true");
+    if (!on) return undefined;
+
+    const { planUpgrades } = await import("./Engine/TopGearEngine");
+    const hashes: string[] = [];
+    result.itemSet.itemList.forEach((item: any) => {
+      if (item.slot === "CombinedWeapon" && item.offhandID > 0) hashes.push(item.mainHandUniqueHash, item.offHandUniqueHash);
+      else hashes.push(item.uniqueHash);
+    });
+
+    const items = hashes.map((hash) => props.player.getItemByHash(hash)[0]).filter(Boolean);
+    if (items.length === 0) return undefined;
+
+    const budget = (props.player.upgradeCurrency || {}).currencies || {};
+    const plan = planUpgrades(items, props.player, contentType, baseHPS, playerSettings,
+                              props.player.getActiveModel(contentType), budget);
+
+    return plan.map((purchase: any) => ({
+      id: purchase.item.id, slot: purchase.item.slot,
+      fromLevel: purchase.fromLevel, toLevel: purchase.toLevel,
+      crest: purchase.crest, crests: purchase.crests,
+      gain: Math.round(purchase.gain), spent: purchase.spent,
+    }));
+  };
+
   const shortenReport = (report: TopGearResult, player: Player, itemList: Item[]) => {
     const itemsAdded: String[] = []
     console.log(report);
@@ -428,6 +593,8 @@ export default function TopGear(props: any) {
         differentials: report.differentials, 
         new: false,
         contentType: report.contentType,
+        embellishedSelected: report.embellishedSelected,
+        equippedHPS: report.equippedHPS,
         effectList: report.itemSet.effectList, 
         
        
@@ -440,8 +607,10 @@ export default function TopGear(props: any) {
                   socketedGems: report.itemSet.gems || [],
                   reforges: report.itemSet.reforges || {},
                   folioGems: report.itemSet.folioGems || [],
+                  folioAuto: report.itemSet.folioAuto || [],
                   firstSocket: report.itemSet.firstSocket,
                   hardScore: report.itemSet.hardScore,
+                  setHPS: report.itemSet.setHPS,
                   statBreakdown: report.itemSet.statBreakdown,
                 },
         player: {name: player.charName, realm: player.realm, race: player.race || "", region: player.region, spec: player.spec, model: player.getActiveModel(report.contentType).modelName},
@@ -453,6 +622,9 @@ export default function TopGear(props: any) {
         let newItem: ReportItem = {id: item.id, level: item.level, isEquipped: item.isEquipped, stats: item.stats};
         if ('leech' in item.stats && item.stats.leech > 0) newItem.leech = item.stats.leech;
         if (item.socket) newItem.socket = item.socket;
+        // Kept so the report can tell a gem it's recommending apart from one already socketed.
+        if (item.gemString) newItem.gemString = item.gemString;
+        if (item.enchantID) newItem.enchantID = item.enchantID;
         //if (item.socketedGems) newItem.socketedGems = item.socketedGems;
         if (item.vaultItem) newItem.vaultItem = item.vaultItem;
         if (item.exclusiveItem) newItem.exclusiveItem = item.exclusiveItem;
@@ -520,22 +692,45 @@ export default function TopGear(props: any) {
     if (gameType === "Retail") {
       //console.log(instance);
 
-      runWorker("Retail", {
-        itemList,
-        wepCombos,
-        strippedPlayer,
-        contentType,
-        baseHPS,
-        playerSettings,
-        strippedCastModel,
-      })
-        .then((result: TopGearResult | null) => { // 
+      // Gear sets are evaluated independently, so the run splits cleanly across workers. Each builds the same sets
+      // and evaluates a disjoint slice of them, and finishTopGear merges their rankings into one report - see the
+      // sharding tests for why the merged result is the same one a single thread produces.
+      // Workers are not free: each one parses the engine bundle and builds every database before it evaluates a
+      // single set, which measured at ~0.6s of pure startup. Spending eight of those on a run that takes two
+      // seconds makes it slower, and it showed up as every run having the same floor no matter how small.
+      // So parallelism is bought only once there's enough work for each worker to earn its own startup back.
+      // One core is left for this thread, so drawing the progress bar never competes with a worker for one.
+      const EVALUATIONS_PER_WORKER = 50000;
+      const maxWorkers = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
+      const estimated = estimateEvaluations(itemList, wepCombos, playerSettings, props.player.spec);
+      const shardCount = Math.max(1, Math.min(maxWorkers, Math.floor(estimated / EVALUATIONS_PER_WORKER)));
+      shardProgress.current = [];
+
+      Promise.all(Array.from({ length: shardCount }, (_unused, index) =>
+        runWorker("Retail", {
+          itemList,
+          wepCombos,
+          strippedPlayer,
+          contentType,
+          baseHPS,
+          playerSettings,
+          strippedCastModel,
+          shard: { index, count: shardCount },
+        }, receiveShardProgress(index))))
+        // Imported lazily: a static import would pull the whole engine into the main bundle, when it already
+        // travels as the chunk the workers load.
+        .then(async (shards: any[]) => {
+          const { finishTopGear } = await import("./Engine/TopGearEngine");
+          return finishTopGear(shards, props.player, contentType, props.player.getActiveModel(contentType));
+        })
+        .then(async (result: TopGearResult | null) => { // 
           if (result) {
             // If top gear completes successfully, log a successful run, terminate the worker and then press on to the Report.
             apiSendTopGearSet(props.player, contentType, result.itemSet.hardScore, result.itemsCompared);
             //props.setTopResult(result);
             const shortResult = shortenReport(result, props.player, itemList);
             if (shortResult) shortResult.new = true; // Check that shortReport didn't return null.
+            if (shortResult) shortResult.crestPlan = await planCrests(result, contentType, baseHPS);
             props.setTopResult(shortResult);
 
             history.push("/report/");
@@ -543,6 +738,7 @@ export default function TopGear(props: any) {
           else { // A valid set was not returned.
             setErrorMessage("Top Gear has crashed. So sorry! It's been automatically reported.");
             console.log("Null Set Returned");
+            progressBar.current?.clear();
             setBtnActive(true);
           }
         })
@@ -551,6 +747,7 @@ export default function TopGear(props: any) {
           reportError("", "Top Gear Crash", err, strippedPlayer.spec);
           setErrorMessage("Top Gear has crashed. So sorry! It's been automatically reported.");
           console.log(err);
+          progressBar.current?.clear();
           setBtnActive(true);
         });
     } else if (gameType === "Classic") {
@@ -655,11 +852,17 @@ export default function TopGear(props: any) {
   };
 
   // We'll run our Engine in a separate thread to avoid blocking the UI.
-  const runWorker = (gameType: gameTypes, args: any) => {
+  const runWorker = (gameType: gameTypes, args: any, onProgress?: (p: any) => void) => {
     return new Promise((resolve, reject) => {
       const worker = createTopGearWorker();
   
       worker.onmessage = (event) => {
+        // Progress messages arrive throughout the run; only the final one carries a result.
+        if (event.data.progress) {
+          if (onProgress) onProgress(event.data.progress);
+          return;
+        }
+
         const { success, result, error } = event.data;
         worker.terminate();
         if (success) resolve(result);
@@ -679,6 +882,8 @@ export default function TopGear(props: any) {
     /* ----------------------- Call to the Top Gear Engine. Lock the app down. ---------------------- */
     if (checkTopGearValid()) {
       setBtnActive(false);
+      progressBar.current?.clear();
+      runStartedAt.current = performance.now();
       // Special Error Code
       try {
         unleashWorker();
@@ -686,10 +891,18 @@ export default function TopGear(props: any) {
         setErrorMessage("Top Gear has crashed. Sorry! It's been automatically reported.");
         reportError("", "Top Gear Full Crash", err, JSON.stringify(props.player) || "");
         console.log(err);
+        progressBar.current?.clear();
         setBtnActive(true);
       }
     }
   };
+
+  /* ---------------------------------------------------------------------------------------------- */
+  /*                                        Run progress bar                                        */
+  /* ---------------------------------------------------------------------------------------------- */
+  // A run can take anywhere from a second to several minutes depending on how many items are selected and how
+  // wide the gem / enchant / rune search is, and until now the button just went grey. The engine reports its
+  // progress about a hundred times over a run, which is enough to both fill a bar and estimate what's left.
 
   const changeReforgeFrom = (buttonClicked: "string") => {
     if (reforgeFromList.includes(buttonClicked)) {
@@ -776,12 +989,19 @@ export default function TopGear(props: any) {
             allChars={props.allChars}
             contentType={contentType}
             singleUpdate={props.singleUpdate}
+            optimizeToggle={true}
           />
         </Grid>
 
         <Grid item xs={12}>
           <ItemBar player={props.player} setItemList={setItemList} />
         </Grid>
+
+        {gameType === "Retail" ? (
+          <Grid item xs={12}>
+            <GearOptionsSelector playerSettings={playerSettings} updateSetting={updateGearOption} spec={props.player.spec} selectedItems={props.player.getSelectedItems()} />
+          </Grid>
+        ) : null}
         {gameType === "Classic" && getSetting(playerSettings, "reforgeSetting") === "Manual"? 
         <Grid item xs={12}>
           <TopGearReforgePanel changeReforgeFrom={changeReforgeFrom} changeReforgeTo={changeReforgeTo} reforgeFrom={reforgeFromList} reforgeTo={reforgeToList} />
@@ -797,7 +1017,7 @@ export default function TopGear(props: any) {
                 <Divider style={{ marginBottom: 10, width: "42%" }} />
                 <Grid container spacing={1}>
                   {[...props.player.getActiveItems(key.slotName)].map((item, index) => (
-                    <MiniItemCard key={index} item={item} itemKey={index} setCustomItemOptions={setCustomItemOptions} embellishItem={embellishItem} upgradeItem={upgradeItem} activateItem={activateItem} delete={deleteItem} catalyze={catalyzeItem} /*primGems={props.player.getBestPrimordialIDs(playerSettings, contentType)}*/ />
+                    <MiniItemCard key={index} item={item} itemKey={index} setCustomItemOptions={setCustomItemOptions} embellishItem={embellishItem} recraftItem={recraftItem} upgradeItem={upgradeItem} activateItem={activateItem} delete={deleteItem} catalyze={catalyzeItem} /*primGems={props.player.getBestPrimordialIDs(playerSettings, contentType)}*/ />
                   ))}
                 </Grid>
               </Grid>
@@ -844,6 +1064,7 @@ export default function TopGear(props: any) {
           <Typography variant="subtitle1" align="center" style={{ padding: "2px 2px 2px 2px", marginRight: "5px" }} color="primary">
               {getErrorMessage()}
             </Typography>
+          <RunProgress ref={progressBar} />
           <div>
             <Button 
               variant="contained" 

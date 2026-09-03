@@ -19,6 +19,13 @@ import {
   calcStatsAtLevel,
   autoAddItems,
   getItemEffectOptions,
+  hasUnallocatedStats,
+  parseMissives,
+  craftedStatIDs,
+  missiveBonusIDs,
+  CRAFTED_STAT_CHOICES,
+  CRAFTED_STAT_CHOICES_RANDOM,
+  CRAFTED_STAT_CHOICES_ENGINEERING,
 } from "../../Engine/ItemUtilities";
 import { CONSTRAINTS } from "../../Engine/CONSTRAINTS";
 import { useSelector } from "react-redux";
@@ -61,7 +68,7 @@ export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary
   if (isCrafted || isRandomStats) {
 
     // Item is a legendary and gets special handling.
-    const missiveStats = missives.toLowerCase().replace(" (engineering)", "").replace(/ /g, "").split("/");
+    const missiveStats = parseMissives(missives);
     let itemAllocations = getItemAllocations(itemID, missiveStats);
     let craftedSocket = itemSocket || checkDefaultSocket(itemID);
     item = new Item(itemID, itemName, itemSlot, craftedSocket, itemTertiary, 0, itemLevel, "");
@@ -69,26 +76,12 @@ export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary
 
     //if (item.slot === "Neck") item.socket = 3;
 
-    let bonusString = "";
     if (isRandomStats) {
-      let craftedStats = [];
-      missiveStats.forEach(stat => {
-        if (stat === "haste") craftedStats.push(36);
-        else if (stat ==="crit") craftedStats.push(32);
-        else if (stat === "versatility") craftedStats.push(40);
-        else if (stat === "mastery") craftedStats.push(49);
-      })
-
-      item.craftedStats = craftedStats;
+      item.craftedStats = craftedStatIDs(missiveStats);
     }
     else {
-      if (missives.includes("Haste")) bonusString += ":6649";
-      if (missives.includes("Mastery")) bonusString += ":6648";
-      if (missives.includes("Crit")) bonusString += ":6647";
-      if (missives.includes("Versatility")) bonusString += ":6650";
-
       item.missiveStats = missiveStats;
-      item.bonusIDS = bonusString;
+      item.bonusIDS = missiveBonusIDs(missiveStats);
     }
     
     item.guessItemQuality();
@@ -284,35 +277,10 @@ export default function ItemBar(props) {
     }
   };
   /* ---------------------------------------- Missive Array --------------------------------------- */
-  let craftedStatPossibilities = [
-    "Haste / Versatility",
-    "Haste / Mastery",
-    "Haste / Crit",
-    "Crit / Mastery",
-    "Crit / Versatility",
-    "Mastery / Versatility",
-    "Haste (engineering)",
-    "Crit (engineering)",
-    "Mastery (engineering)",
-    "Versatility (engineering)",
-  ];
+  let craftedStatPossibilities = [...CRAFTED_STAT_CHOICES, ...CRAFTED_STAT_CHOICES_ENGINEERING];
 
-  if (getItemProp(itemID, "randomStats", gameType)) {//itemID === 228843 || itemID === 238034) {
-    craftedStatPossibilities = [
-      "Haste / Versatility",
-      "Haste / Mastery",
-      "Haste / Crit",
-      "Crit / Versatility",
-      "Crit / Haste",
-      "Crit / Mastery",
-      "Mastery / Haste",
-      "Mastery / Crit",
-      "Mastery / Versatility",
-      "Versatility / Haste",
-      "Versatility / Crit",
-      "Versatility / Mastery",
-    ]
-
+  if (getItemProp(itemID, "randomStats", gameType)) {
+    craftedStatPossibilities = [...CRAFTED_STAT_CHOICES_RANDOM];
   }
 
   /*const getCraftedMissives = (itemID) => {
@@ -330,7 +298,9 @@ export default function ItemBar(props) {
     itemLevel: true,
     socket: gameType === "Retail" && CONSTANTS.socketSlots.includes(getItemProp(itemID, "slot", gameType)),
     tertiaries: !(isItemCrafted) && gameType === "Retail",
-    missives: isItemCrafted || getItemProp(itemID, "randomStats", gameType),
+    // Only offer the crafted stat picker when the item actually has stat budget to assign. Generic crafts always
+    // do; fixed-embellished items don't, and showing a picker there implies a choice that has no effect.
+    missives: (isItemCrafted && hasUnallocatedStats(itemID, gameType)) || getItemProp(itemID, "randomStats", gameType),
     specialEffect: itemEffectOptions.length > 0,
   }
 

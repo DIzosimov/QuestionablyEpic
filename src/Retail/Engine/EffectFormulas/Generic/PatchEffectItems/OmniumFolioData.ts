@@ -1,7 +1,7 @@
 import { convertPPMToUptime, processedValue, runGenericPPMTrinket, 
     getHighestStat, getLowestStat, runGenericOnUseTrinket, getDiminishedValue, runDiscOnUseTrinket, runGenericFlatProc } from "Retail/Engine/EffectFormulas/EffectUtilities";
     
-import { compileStats, getEstimatedHPS } from "General/Engine/ItemUtilities"
+import { compileStats, getEstimatedHPS, getGearOption, buildChoiceCombinations, countChoiceCombinations, isOptimizeAllGear, keepsExistingGear } from "General/Engine/ItemUtilities"
 
 import Player from "General/Modules/Player/Player";
 
@@ -40,6 +40,142 @@ export const getFolioIcon = (id: number) => {
   if (gem) return gem.icon;
   else console.error("Gem Icon not found");
 }
+
+// The Folio has five rune slots, but only slot 4 - the pure secondary stat slot - is worth choosing between.
+// Slots 2 and 3 have a single rune each, and the slot 1 and 5 runes are procs the engine already picks well, so
+// offering them just multiplied the search for nothing. The setting accepts a rune's shortName or a list of them -
+// selecting several expands the run into one variant per combination, the same as gems and enchants.
+export const FOLIO_STAT_SLOT = 4;
+export const FOLIO_SLOT_SETTINGS: { [slot: number]: string } = { [FOLIO_STAT_SLOT]: "folioSlot4" };
+
+// The rune the engine falls back to when a slot is left on Automatic and there is no stat-weight rule for it.
+const FOLIO_AUTO_DEFAULTS: { [slot: number]: number } = { 1: 1279599, 2: 1279603, 3: 1287555, 5: 1279614 };
+
+// Slot 4 is the pure secondary stat slot, so Automatic follows the player's best stat.
+const FOLIO_STAT_RUNES: { [stat: string]: number } = {
+  haste: 1279610,
+  crit: 1279609,
+  mastery: 1279612,
+  versatility: 1279613,
+};
+
+/**
+ * The Folio runes a character has selected, as SimC reports them.
+ *
+ * SimC writes the Folio as `omnium_talents=<entry>:<rank>/...`, where the entry ids are a different numbering to
+ * the rune spell ids everything else uses. Only entries listed here can be recognised; anything else is ignored
+ * and that slot falls back to the automatic pick, so an unknown entry costs nothing but the knowledge.
+ *
+ * Slot 4 is the only slot whose rune varies - the rest are fixed - so it's the only one worth mapping. All four
+ * were confirmed by exporting the same character once per rune: only the second entry ever moved, and the other
+ * four (136814, 136817, 136819, 136822) stayed put across all of them.
+ */
+const OMNIUM_TALENT_RUNES: { [entryID: number]: number } = {
+  136815: 1279609, // Rune of Critical Power
+  136821: 1279610, // Rune of Burning Haste
+  136818: 1279612, // Rune of Masterful Cunning
+  136820: 1279613, // Rune of the Versatile Warrior
+};
+
+/** The rune ids a character has selected, by slot. Slots we can't identify are simply absent. */
+export const parseOmniumTalents = (line: string): { [slot: number]: number } => {
+  const worn: { [slot: number]: number } = {};
+  const body = (line || "").split("=")[1];
+  if (!body) return worn;
+
+  body.split("/").forEach((entry) => {
+    const entryID = parseInt(entry.split(":")[0], 10);
+    const runeID = OMNIUM_TALENT_RUNES[entryID];
+    if (!runeID) return;
+
+    const rune = omniumFolioData.find((gem) => gem.id === runeID);
+    if (rune) worn[rune.slot] = runeID;
+  });
+
+  return worn;
+};
+
+export const getFolioOptions = (slot: number): string[] => {
+  return omniumFolioData.filter((gem) => gem.slot === slot).map((gem) => gem.shortName);
+};
+
+/**
+ * The runes the player has pinned for one slot. An empty list means Automatic.
+ *
+ * Accepts the bare shortName the setting held before multi-select as well as a list, since that is still what
+ * already-saved profiles hold and upgrading must not silently drop someone's pick.
+ */
+export const getFolioChoices = (settings: any, slot: number): string[] => {
+  const settingKey = FOLIO_SLOT_SETTINGS[slot];
+  if (!settingKey) return [];
+  // Reads as Automatic while the detailed gear options toggle is off, so the runes are the engine's own pick.
+  const raw = getGearOption(settings, settingKey, "Automatic");
+  const pinned = Array.isArray(raw) ? raw : [raw];
+  return pinned.filter((rune: any) => typeof rune === "string" && rune !== "" && rune !== "Automatic");
+};
+
+/**
+ * The runes a run will actually try in a slot: every one of them under "Optimize Everything", otherwise whatever
+ * the player pinned. Kept apart from getFolioChoices so the panel can still show the pins as pins.
+ */
+export const getFolioSearchSpace = (settings: any, slot: number): string[] =>
+  isOptimizeAllGear(settings) ? getFolioOptions(slot) : getFolioChoices(settings, slot);
+
+/** The search space keyed by slot, which is the shape the shared combination helpers expect. */
+const searchSpaceBySlot = (settings: any) => {
+  const bySlot: { [slot: string]: string[] } = {};
+  Object.keys(FOLIO_SLOT_SETTINGS).forEach((slot) => { bySlot[slot] = getFolioSearchSpace(settings, Number(slot)); });
+  return bySlot;
+};
+
+export const countFolioCombinations = (settings: any): number => countChoiceCombinations(searchSpaceBySlot(settings));
+
+/** Expands the runes on offer into every combination, each a complete { slot: shortName } override. */
+export const buildFolioCombinations = (settings: any, cap: number = Infinity): any[] =>
+  buildChoiceCombinations(searchSpaceBySlot(settings), cap);
+
+/**
+ * Resolves the player's Folio settings into the five rune IDs to equip.
+ * Anything left on "Automatic" keeps the behaviour the engine had before the setting existed, so an untouched
+ * settings object produces exactly the same set of runes it always did.
+ * @param settings The player settings object.
+ * @param bestStat The player's highest weighted secondary, used for the Automatic slot 4 pick.
+ * @param folioOverride One combination from buildFolioCombinations, when the run has been expanded into variants.
+ */
+export const getFolioGems = (settings: any, bestStat: string, folioOverride?: any,
+                             wornRunes: { [slot: number]: number } = {}): number[] => {
+  const chosen: number[] = [];
+
+  [1, 2, 3, 4, 5].forEach((slot) => {
+    // A rune the character already has beats the engine's pick when they've asked to keep what they have, the
+    // same way their gems and enchants do.
+    if (keepsExistingGear(settings) && wornRunes[slot]) {
+      chosen.push(wornRunes[slot]);
+      return;
+    }
+
+    const override = folioOverride ? folioOverride[slot] : undefined;
+    const choices = getFolioChoices(settings, slot);
+    // A variant names one rune per slot. Failing that a single pinned rune is used directly - but several pinned
+    // and no variant means there is no single answer, so the slot goes back to Automatic rather than guessing.
+    const choice = typeof override === "string" ? override : (choices.length === 1 ? choices[0] : "Automatic");
+
+    if (choice !== "Automatic") {
+      const match = omniumFolioData.find((gem) => gem.slot === slot && gem.shortName === choice);
+      if (match) {
+        chosen.push(match.id);
+        return;
+      }
+      // An unrecognised choice (renamed rune, stale local storage) falls through to Automatic rather than
+      // dropping the slot entirely, which would silently cost the player a rune.
+    }
+
+    if (slot === 4) chosen.push(FOLIO_STAT_RUNES[bestStat] || FOLIO_STAT_RUNES.haste);
+    else chosen.push(FOLIO_AUTO_DEFAULTS[slot]);
+  });
+
+  return chosen;
+};
 
 export const getShortName = (id: number) => {
   const gem = omniumFolioData.filter(gem => gem.id == id)[0];
@@ -214,7 +350,7 @@ export const omniumFolioData: Array<folioGemType> = [
   },
     {
     name: "Rune of Burning Haste",
-    id: 1287774,
+    id: 1279610,
     icon: "spell_fire_burningspeed",
     slot: 4,
     shortName: "Haste",
@@ -240,7 +376,7 @@ export const omniumFolioData: Array<folioGemType> = [
   },
       {
     name: "Rune of Masterful Cunning",
-    id: 1287771,
+    id: 1279612,
     icon: "ability_hunter_fervor",
     slot: 4,
     shortName: "Mastery",
