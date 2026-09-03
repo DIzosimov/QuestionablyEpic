@@ -102,34 +102,6 @@ export function buildNewWepCombosUF(player, itemList) {
 
 
 // PlayerSettings = Upgrade Finder Settings
-/**
- * The settings every Upgrade Finder evaluation runs under.
- *
- * Two departures from whatever Top Gear is set to:
- *
- * Gear is measured as it actually is - the player's own gems, enchants and Folio runes - rather than against a
- * re-gemmed ideal, so the percentage answers "how much better would this item make me" rather than "how much
- * better would this item and a full re-gem make me". The candidate item itself has none of those, so it's gemmed
- * and enchanted automatically like any new drop would be.
- *
- * And the gem and enchant expansion is off. This runs a full evaluation per candidate item, hundreds of times, on
- * the thread drawing the page - searching combinations per candidate would cost millions of evaluations for an
- * estimate that's meant to be rough. It also keeps the comparison honest: item A only tells you something about
- * item B if both were gemmed the same way, and a per candidate search can hand one of them a better loadout for
- * reasons that have nothing to do with the item.
- */
-export function upgradeFinderGearSettings(userSettings) {
-  const off = (setting) => ({ ...(userSettings[setting] || {}), value: false });
-
-  return {
-    ...userSettings,
-    forceTier: { value: "S2" },
-    replaceExistingGems: off("replaceExistingGems"),
-    detailedGearOptions: off("detailedGearOptions"),
-    optimizeAllGearOptions: off("optimizeAllGearOptions"),
-  };
-}
-
 export function runUpgradeFinder(player, contentType, currentLanguage, playerSettings, userSettings) {
   // TEMP VARIABLES
   const completedItemList = [];
@@ -141,7 +113,7 @@ export function runUpgradeFinder(player, contentType, currentLanguage, playerSet
   const wepList = buildNewWepCombosUF(player, baseItemList);
   const castModel = player.getActiveModel(contentType);
 
-  const moddedSettings = upgradeFinderGearSettings(userSettings);
+  const moddedSettings = {...userSettings, forceTier: {value: "S2"}};
 
   const baseHPS = player.getHPS(contentType);
   //userSettings.dominationSockets = "Upgrade Finder";
