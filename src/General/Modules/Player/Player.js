@@ -368,6 +368,18 @@ export class Player {
     return newItem;
   };
 
+  /**
+   * Puts an item on a different upgrade track.
+   *
+   * Changed in place rather than copied, unlike an embellishment or a stat combination: the track doesn't change
+   * what the piece gives you now, only what it can be upgraded to, so there's nothing to compare two versions of.
+   */
+  setUpgradeTrack = (item, track) => {
+    const found = this.activeItems.find((active) => active.uniqueHash === item.uniqueHash);
+    if (found) found.upgradeTrack = track;
+    return found;
+  };
+
   changeCustomOption = (item, selectedOption) => {
     const newItem = item.clone();
     newItem.active = true;

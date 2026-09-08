@@ -715,50 +715,80 @@ export function finishTopGear(shards: TopGearShardResult[], player: Player, cont
 }
 
 /**
- * What to spend crests on, for a set the player is actually wearing or aiming at.
+ * What to spend crests on.
  *
- * The healing an upgrade is worth is measured by re-scoring the set with that one item raised, through the same
- * evalSet everything else goes through, so a rank is valued on what it does for this set rather than on its raw
- * stat gain. Purchases already planned are applied first: gear diminishes, so a second point of a stat is worth
- * less than the first and valuing every step against the original gear would keep overvaluing later ones.
+ * `chosen` is the set the run settled on. `candidates` are pieces that were in the running but lost their slot -
+ * a piece has to clear the one it would replace before it gains anything, so a plan built only from the winning
+ * set can never buy into one that two upgrades would make the better choice, which is the whole point of adding
+ * a piece to try it.
  *
- * Scores are cached by the levels the set is wearing, since the greedy search asks about the same combination
- * repeatedly as it works down the list.
+ * A candidate is pinned to the weakest piece in its slot up front rather than being re-matched on every scoring:
+ * which piece it would displace doesn't change as crests are spent, and deciding it per evaluation would multiply
+ * the cost of the search by the number of candidates.
+ *
+ * The healing a rank is worth is measured by re-scoring the set through the same evalSet as everything else, with
+ * everything already planned applied first - gear diminishes, and it isn't only the upgraded piece that shifts.
+ * Scores are cached by the set being worn, since the search asks about the same combination repeatedly.
  */
-export function planUpgrades(items: Item[], player: Player, contentType: contentTypes, baseHPS: number,
-                             userSettings: any, castModel: any, budget: CrestBudget): PlannedPurchase[] {
+export function planUpgrades(chosen: Item[], candidates: Item[], player: Player, contentType: contentTypes,
+                             baseHPS: number, userSettings: any, castModel: any, budget: CrestBudget): PlannedPurchase[] {
   const newPlayer = setupPlayer(player, contentType, castModel);
-  const scores: { [levels: string]: number } = {};
+  const scores: { [key: string]: number } = {};
 
-  const scoreAt = (levels: number[]): number => {
-    const key = levels.join("/");
+  // The piece each candidate would displace: the weakest of its slot, which is the one worth replacing.
+  const displaces = new Map<Item, Item>();
+  candidates.forEach((candidate) => {
+    const sameSlot = chosen.filter((item) => item.slot === candidate.slot);
+    if (sameSlot.length === 0) return;
+    displaces.set(candidate, sameSlot.reduce((worst, item) => (item.softScore < worst.softScore ? item : worst), sameSlot[0]));
+  });
+  const usable = candidates.filter((candidate) => displaces.has(candidate));
+  const all = [...chosen, ...usable];
+
+  const atLevel = (item: any, level: number) => {
+    if (item.level === level) return item;
+    // A copy, so working out what an upgrade would be worth never alters the player's own gear.
+    const raised = item.clone();
+    raised.updateLevel(level, item.missiveStats);
+    return raised;
+  };
+
+  /** The set being worn, given every piece's level and which candidates have been bought into. */
+  const scoreOf = (levels: number[], swappedIn: Set<Item>): number => {
+    const key = levels.join("/") + "|" + all.filter((item) => swappedIn.has(item)).map((item) => item.uniqueHash).join(",");
     if (key in scores) return scores[key];
 
-    // A copy per item, so the player's own gear is never altered by working out what upgrading it would be worth.
-    const raised = items.map((item: any, i: number) => {
-      if (item.level === levels[i]) return item;
-      const copy = item.clone();
-      copy.updateLevel(levels[i], item.missiveStats);
-      return copy;
+    const worn = chosen.map((item) => atLevel(item, levels[all.indexOf(item)]));
+    usable.forEach((candidate) => {
+      if (!swappedIn.has(candidate)) return;
+      const slot = worn.indexOf(displaces.get(candidate) as Item);
+      if (slot >= 0) worn[slot] = atLevel(candidate, levels[all.indexOf(candidate)]);
     });
 
-    const scored = evalSet(new ItemSet(-1, raised, 0, player.spec), newPlayer, contentType, baseHPS, userSettings,
+    const scored = evalSet(new ItemSet(-1, worn, 0, player.spec), newPlayer, contentType, baseHPS, userSettings,
                            castModel, false, 0, undefined, undefined, undefined, undefined, true);
     scores[key] = scored.setHPS || scored.hardScore || 0;
     return scores[key];
   };
 
-  // The levels the set would be wearing once everything planned so far is bought.
   const levelsAfter = (bought: UpgradeStep[]): number[] =>
-    items.map((item) => bought.filter((step) => step.item === item).reduce((level, step) => Math.max(level, step.toLevel), item.level));
+    all.map((item) => bought.filter((step) => step.item === item).reduce((level, step) => Math.max(level, step.toLevel), item.level));
+
+  const swappedAfter = (bought: UpgradeStep[]): Set<Item> =>
+    new Set(bought.map((step) => step.item).filter((item) => usable.includes(item as Item)) as Item[]);
 
   const gainOf = (step: UpgradeStep, bought: UpgradeStep[]): number => {
     const before = levelsAfter(bought);
-    const after = before.map((level, i) => (items[i] === step.item ? step.toLevel : level));
-    return scoreAt(after) - scoreAt(before);
+    const after = before.map((level, i) => (all[i] === step.item ? step.toLevel : level));
+
+    const swapped = swappedAfter(bought);
+    const withStep = new Set(swapped);
+    if (usable.includes(step.item)) withStep.add(step.item);
+
+    return scoreOf(after, withStep) - scoreOf(before, swapped);
   };
 
-  return planCrestSpending(items, budget, gainOf);
+  return planCrestSpending(all, budget, gainOf);
 }
 
 /**

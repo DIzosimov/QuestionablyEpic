@@ -72,11 +72,11 @@ export function upgradeStepsFor(item: any): UpgradeStep[] {
   }));
 }
 
-const canAfford = (step: UpgradeStep, budget: CrestBudget): boolean => {
+const canAfford = (step: UpgradeStep, budget: CrestBudget, crests = step.crests): boolean => {
   const currency = crestCurrency(step.crest);
   if (!currency) return false; // A tier we can't identify is never spent - see CrestDB.
 
-  return (budget[currency] || 0) >= step.crests;
+  return (budget[currency] || 0) >= crests;
 };
 
 const pay = (step: UpgradeStep, budget: CrestBudget): CrestBudget => ({
@@ -106,27 +106,36 @@ export function planCrestSpending(items: any[], budget: CrestBudget,
   const spent: { [currencyID: number]: number } = {};
 
   while (true) {
-    let best: { step: UpgradeStep; gain: number; efficiency: number; queue: UpgradeStep[] } | null = null;
+    let best: { step: UpgradeStep; gain: number; efficiency: number; queue: UpgradeStep[]; upTo: number; crests: number } | null = null;
 
     queues.forEach((queue) => {
-      const step = queue[0];
-      if (!step || !canAfford(step, remaining)) return;
+      // Every level this piece could be taken to, not just its next rank. A piece that isn't currently worn has
+      // to clear the one in its slot before it gains anything at all, so its first rank alone reads as worthless
+      // and a rank-at-a-time search would never buy into it. Costing the whole climb lets it compete.
+      let crests = 0;
+      for (let rank = 0; rank < queue.length; rank++) {
+        crests += queue[rank].crests;
+        if (!canAfford(queue[rank], remaining, crests)) break;
 
-      const gain = gainOf(step, plan);
-      // An upgrade that gains nothing is not worth a crest, however cheap it is.
-      if (gain <= 0) return;
+        const gain = gainOf(queue[rank], plan);
+        // An upgrade that gains nothing is not worth a crest, however cheap it is.
+        if (gain <= 0) continue;
 
-      const efficiency = gain / Math.max(1, step.crests);
-      if (!best || efficiency > best.efficiency) best = { step, gain, efficiency, queue };
+        const efficiency = gain / Math.max(1, crests);
+        if (!best || efficiency > best.efficiency) best = { step: queue[rank], gain, efficiency, queue, upTo: rank, crests };
+      }
     });
 
     if (!best) return plan;
 
-    const { step, gain, efficiency, queue } = best;
-    remaining = pay(step, remaining);
-    spent[crestCurrency(step.crest)] = (spent[crestCurrency(step.crest)] || 0) + step.crests;
+    const { step, gain, efficiency, queue, upTo, crests } = best;
+    // The whole climb is bought at once, and recorded as the single decision it is: one piece, from where it is
+    // now to where it ends up, for what that costs.
+    const bought: UpgradeStep = { ...step, fromLevel: queue[0].fromLevel, crests };
+    remaining = pay(bought, remaining);
+    spent[crestCurrency(bought.crest)] = (spent[crestCurrency(bought.crest)] || 0) + crests;
 
-    plan.push({ ...step, gain, efficiency, spent: { ...spent } });
-    queue.shift();
+    plan.push({ ...bought, gain, efficiency, spent: { ...spent } });
+    queue.splice(0, upTo + 1);
   }
 }

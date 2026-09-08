@@ -28,6 +28,7 @@ interface ItemCardButtonWithMenuProps {
   embellishItem: (item: any, embellishmentName: string) => void;
   setCustomItemOptions: (item: any, selectedOption: number[]) => void;
   recraftItem?: (item: any, missives: string) => void;
+  setUpgradeTrack?: (item: any, track: string) => void;
   item: any;
   gameType?: gameTypes;
 }
@@ -91,6 +92,17 @@ const getExtraMenuItems = (item: any, gameType: gameTypes): MenuItemType[] => {
       });
     });
 
+  // Which track the piece is on. The SimC import reads this from bonus ids, so an imported item already has one;
+  // an item added by hand has nothing to read it from, and without a track it offers no upgrades at all and can
+  // never appear in a crest plan. Changing it is how a piece is tried on a different track.
+  if (gameType === "Retail") {
+    ["Champion", "Hero", "Myth"]
+      .filter((track) => track !== item.upgradeTrack)
+      .forEach((track) => {
+        items.push({ id: items.length + 1, ilvlMinimum: 0, type: "track", label: "Set track: " + track, effectName: track });
+      });
+  }
+
   // The same for the two secondaries a crafted item is made with - a copy carrying a different pair, rather than
   // rebuilding the item from scratch in the add form to try one.
   if (gameType === "Retail" && isRecraftable(item)) {
@@ -126,7 +138,7 @@ const getExtraMenuItems = (item: any, gameType: gameTypes): MenuItemType[] => {
 
 }
 
-const ItemCardButtonWithMenu: React.FC<ItemCardButtonWithMenuProps> = ({ key, deleteActive, deleteItem, canBeCatalyzed, catalyseItemCard, itemLevel, upgradeItem, setCustomItemOptions, embellishItem, recraftItem, item, gameType }) => {
+const ItemCardButtonWithMenu: React.FC<ItemCardButtonWithMenuProps> = ({ key, deleteActive, deleteItem, canBeCatalyzed, catalyseItemCard, itemLevel, upgradeItem, setCustomItemOptions, embellishItem, recraftItem, setUpgradeTrack, item, gameType }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const { t } = useTranslation();
 
@@ -151,6 +163,7 @@ const ItemCardButtonWithMenu: React.FC<ItemCardButtonWithMenuProps> = ({ key, de
     else if (menuItem.type === "vault") upgradeItem(item, 0, false, true);
     else if (menuItem.type === "embellishment") embellishItem(item, menuItem.effectName);
     else if (menuItem.type === "recraft") { if (recraftItem) recraftItem(item, menuItem.effectName as unknown as string); }
+    else if (menuItem.type === "track") { if (setUpgradeTrack) setUpgradeTrack(item, menuItem.effectName as unknown as string); }
     else if (menuItem.type === "custom") setCustomItemOptions(item, menuItem.effectName);
     handleClose();
 

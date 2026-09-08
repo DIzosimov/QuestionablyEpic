@@ -56,7 +56,18 @@ const Alert = React.forwardRef(function Alert(props, ref) {
 
 
 // Create and return an item. Could maybe be merged with the SimC createItem function?
-export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary, missives = "", gameType) => {
+// The upgrade tracks a piece can be put on by hand. Named for the crest that pays for them, matching
+// CONSTANTS.itemLevelCaps. The crafted tracks aren't here: those come with the craft rather than being chosen.
+export const UPGRADE_TRACKS = [
+  { value: "", label: "None" },
+  { value: "Adventurer", label: "Adventurer" },
+  { value: "Veteran", label: "Veteran" },
+  { value: "Champion", label: "Champion" },
+  { value: "Hero", label: "Hero" },
+  { value: "Myth", label: "Myth" },
+];
+
+export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary, missives = "", gameType, upgradeTrack = "") => {
 
   //let player = props.player;
   let item = "";
@@ -90,6 +101,11 @@ export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary
     //item.guessItemQuality();
     item.quality = getItemProp(itemID, "quality", gameType);
   }
+
+  // Which track the piece is on, so it can be upgraded with crests. The SimC import reads this from bonus ids;
+  // an item added by hand has nothing to read it from, so it's asked for instead - without it the piece offers no
+  // upgrades and never appears in a crest plan.
+  if (upgradeTrack) item.upgradeTrack = upgradeTrack;
   //item.softScore = scoreItem(item, player, contentType, gameType, playerSettings);
 
   return item;
@@ -156,6 +172,7 @@ export default function ItemBar(props) {
   const [itemTertiary, setItemTertiary] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [missives, setMissives] = useState("Haste / Versatility");
+  const [upgradeTrack, setUpgradeTrack] = useState("");
   const [itemEffect, setItemEffect] = useState({type: "", effectName: "", label: ""});
 
   /* ------------------------ End Simc Module Functions ----------------------- */
@@ -189,7 +206,7 @@ export default function ItemBar(props) {
     //let item = "";
 
     if (true) { // Formerly Retail check. TODO.
-      const item = createItem(itemID, itemName, itemLevel, itemSocket, itemTertiary, missives, gameType);
+      const item = createItem(itemID, itemName, itemLevel, itemSocket, itemTertiary, missives, gameType, upgradeTrack);
 
       if (item) {
         if (itemEffect.type !== "") {
@@ -302,6 +319,7 @@ export default function ItemBar(props) {
     // do; fixed-embellished items don't, and showing a picker there implies a choice that has no effect.
     missives: (isItemCrafted && hasUnallocatedStats(itemID, gameType)) || getItemProp(itemID, "randomStats", gameType),
     specialEffect: itemEffectOptions.length > 0,
+    upgradeTrack: gameType === "Retail",
   }
 
   const autoAddOptions = [
@@ -442,6 +460,25 @@ export default function ItemBar(props) {
                       </MenuItem>
                     );
                   })}
+                </Select>
+              </FormControl>
+            </Grid>
+          ) : ""}
+          {
+          /* ---------------------------------------------------------------------------------------------- */
+          /*                                          Upgrade track                                          */
+          /* ---------------------------------------------------------------------------------------------- */
+          availableFields.upgradeTrack ? (
+            <Grid item>
+              <FormControl className={classes.formControl} variant="outlined" size="small" disabled={itemLevel === ""}>
+                <InputLabel id="trackSelection">{t("QuickCompare.UpgradeTrack")}</InputLabel>
+                <Select key={"trackSelection"} labelId="trackSelection" value={upgradeTrack}
+                        onChange={(e) => setUpgradeTrack(e.target.value)} label={t("QuickCompare.UpgradeTrack")}>
+                  {UPGRADE_TRACKS.map((track, i, arr) => (
+                    <MenuItem divider={i + 1 !== arr.length} key={track.value} value={track.value}>
+                      {track.label}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
             </Grid>

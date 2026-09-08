@@ -326,6 +326,11 @@ export default function TopGear(props: any) {
     gearChanged();
   }
 
+  const setUpgradeTrack = (item: Item, track: string) => {
+    props.player.setUpgradeTrack(item, track);
+    gearChanged();
+  }
+
   const setCustomItemOptions = (item: Item, selectedOption: number[]) => {
     let player = props.player;
     player.changeCustomOption(item, selectedOption);
@@ -585,14 +590,21 @@ export default function TopGear(props: any) {
       else hashes.push(item.uniqueHash);
     });
 
-    const items = hashes.map((hash) => props.player.getItemByHash(hash)[0]).filter(Boolean);
-    if (items.length === 0) return undefined;
+    const chosen = hashes.map((hash) => props.player.getItemByHash(hash)[0]).filter(Boolean);
+    if (chosen.length === 0) return undefined;
+
+    // Every piece that was in the running, not only the ones that won a slot. A piece has to clear the one it
+    // would replace before it gains anything, so planning only the winning set can never buy into a piece that
+    // two upgrades would make the better choice - which is the whole point of adding one to try it.
+    const alsoConsidered = props.player.getSelectedItems()
+      .filter((item: any) => item.upgradeTrack && !chosen.some((pick: any) => pick.uniqueHash === item.uniqueHash));
+
 
     // What the import read, with anything typed into the crest boxes over the top - so a plan can be tried
     // against crests not earned yet without touching the character.
     const { crestBudget } = await import("./Engine/CrestSpending");
     const budget = crestBudget((props.player.upgradeCurrency || {}).currencies || {}, playerSettings);
-    const plan = planUpgrades(items, props.player, contentType, baseHPS, playerSettings,
+    const plan = planUpgrades(chosen, alsoConsidered, props.player, contentType, baseHPS, playerSettings,
                               props.player.getActiveModel(contentType), budget);
 
     return {
@@ -1047,7 +1059,7 @@ export default function TopGear(props: any) {
                 <Divider style={{ marginBottom: 10, width: "42%" }} />
                 <Grid container spacing={1}>
                   {[...props.player.getActiveItems(key.slotName)].map((item, index) => (
-                    <MiniItemCard key={index} item={item} itemKey={index} setCustomItemOptions={setCustomItemOptions} embellishItem={embellishItem} recraftItem={recraftItem} upgradeItem={upgradeItem} activateItem={activateItem} delete={deleteItem} catalyze={catalyzeItem} /*primGems={props.player.getBestPrimordialIDs(playerSettings, contentType)}*/ />
+                    <MiniItemCard key={index} item={item} itemKey={index} setCustomItemOptions={setCustomItemOptions} embellishItem={embellishItem} recraftItem={recraftItem} setUpgradeTrack={setUpgradeTrack} upgradeItem={upgradeItem} activateItem={activateItem} delete={deleteItem} catalyze={catalyzeItem} /*primGems={props.player.getBestPrimordialIDs(playerSettings, contentType)}*/ />
                   ))}
                 </Grid>
               </Grid>

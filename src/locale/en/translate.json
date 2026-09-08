@@ -256,7 +256,8 @@
       "Socket": "Socket",
       "Tertiary": "Tertiary",
       "Effect": "Effect",
-      "Title": "Quick Compare"
+      "Title": "Quick Compare",
+      "UpgradeTrack": "Upgrade Track"
     },
     "Race": "Race",
     "Raid": "Raid",
