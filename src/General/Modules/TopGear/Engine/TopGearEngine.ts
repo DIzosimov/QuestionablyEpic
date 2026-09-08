@@ -718,25 +718,38 @@ export function finishTopGear(shards: TopGearShardResult[], player: Player, cont
   // Sets that come out wearing exactly what the best set wears are skipped rather than shown: a row with a score
   // and nothing beside it tells the player nothing. Sets with fewer sockets than the largest one can be gemmed
   // identically by more than one loadout, so a few of these reach here even with the expansion behaving.
-  // Sets that differ only in which gems they wear outnumber everything else by orders of magnitude, and most are
-  // worth a hundredth of a percent. Left alone they fill the list and bury the decisions worth making - a
-  // different trinket, a different enchant, a different potion. So a gem-only alternative has to be worth
-  // something to be shown at all, and only a few are kept however many there are.
-  const GEM_ONLY_THRESHOLD = 0.05;  // percent
+  // An alternative earns its place by being worth reading. Anything under a twentieth of a percent isn't a
+  // decision, it's rounding - and there are thousands of those, because a run that searches gems and enchants
+  // produces a near-identical set for every arrangement of them.
+  const WORTH_SHOWING = 0.05;  // percent
+  // Gem shuffles outnumber everything else by orders of magnitude even above that floor, so only a few are kept
+  // however many clear it, leaving room for the trinket, enchant and potion swaps worth seeing.
   const GEM_ONLY_SHOWN = 3;
   let gemOnlyShown = 0;
+  // Two alternatives describing the same swap - the same enchant on either ring, say - are one alternative.
+  const alreadyShown = new Set<string>();
 
   for (var k = 1; k < resultSets.length && differentials.length < CONSTRAINTS.Shared.topGearDifferentials; k++) {
     const differential = buildDifferential(resultSets[k], primeSet, newPlayer, contentType, castModel.modelType[contentType] || "Default");
     const swaps = differential.items.length + differential.gems.length + differential.enchants.length +
                   differential.runes.length + differential.consumables.length;
-    if (swaps === 0) continue;
+    if (swaps === 0 || Math.abs(differential.scoreDifference) < WORTH_SHOWING) continue;
+
+    const describes = [
+      differential.items.map((item: any) => item.id).sort().join(","),
+      [...differential.gems].sort().join(","),
+      differential.enchants.map((enchant: any) => enchant.name).sort().join(","),
+      [...differential.runes].sort().join(","),
+      differential.consumables.map((consumable: any) => consumable.name).sort().join(","),
+    ].join("|");
+    if (alreadyShown.has(describes)) continue;
+    alreadyShown.add(describes);
 
     const gemOnly = differential.gems.length > 0 && differential.items.length === 0 &&
                     differential.enchants.length === 0 && differential.runes.length === 0 &&
                     differential.consumables.length === 0;
     if (gemOnly) {
-      if (gemOnlyShown >= GEM_ONLY_SHOWN || Math.abs(differential.scoreDifference) < GEM_ONLY_THRESHOLD) continue;
+      if (gemOnlyShown >= GEM_ONLY_SHOWN) continue;
       gemOnlyShown += 1;
     }
 
@@ -1134,7 +1147,10 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
     // Flask, food, potion and the rest. Reported apart from enchants so the report can say which kind of decision
     // an alternative actually represents.
     consumables: [] as { kind: string; name: string }[],
-    scoreDifference: ((Math.round(primeSet.hardScore - itemSet.hardScore) / primeSet.hardScore) * 100 * modelDiff),
+    // Not rounded before dividing. Rounding the score difference first quantised every alternative onto a coarse
+    // grid - a set 14 healing behind and one 77 behind both came out as 0.00% - which made the figure useless
+    // both to read and to filter on. It's rounded for display instead, where rounding belongs.
+    scoreDifference: (((primeSet.hardScore - itemSet.hardScore) / primeSet.hardScore) * 100 * modelDiff),
     rawDifference: Math.round(((itemSet.hardScore - primeSet.hardScore) / primeSet.hardScore) * player.getHPS(contentType) * modelDiff),
 
     // Absolute throughput for this alternative, and the healing it gives up against the best set.

@@ -1706,11 +1706,45 @@ describe("Close alternatives say what kind of decision they are", () => {
     expect(gemOnly.length).toBeLessThanOrEqual(3);
   });
 
-  test("a gem shuffle worth nothing isn't shown at all", () => {
-    const found = alternatives(cfg({ selectedGems: [240898, 240890, 240914], gearVariantLimit: 0 }));
-    const gemOnly = found.filter((d) => d.gems.length > 0 && d.items.length === 0 && d.enchants.length === 0);
+  const WIDE_SEARCH = {
+    selectedGems: [240898, 240890, 240914],
+    gearVariantLimit: 0,
+    enchantChoices: {
+      CombinedWeapon: ["Arcane Mastery", "Berserker's Rage", "Rite of the Hash'ey"],
+      Finger: ["Nature's Fury", "Zul'jin's Mastery", "Silvermoon's Alacrity"],
+    },
+  };
 
-    gemOnly.forEach((d) => expect(Math.abs(d.scoreDifference)).toBeGreaterThanOrEqual(0.05));
+  test("nothing worth less than a twentieth of a percent is shown, whatever it changes", () => {
+    // Not just gem-only ones. A set that shuffles a gem and an enchant together used to slip past the filter
+    // entirely, and those were the bulk of the list.
+    alternatives(cfg(WIDE_SEARCH)).forEach((d) => {
+      expect(Math.abs(d.scoreDifference)).toBeGreaterThanOrEqual(0.05);
+    });
+  });
+
+  test("the difference isn't quantised into uselessness", () => {
+    // Rounding the score difference before dividing put every alternative on a coarse grid - a set 14 healing
+    // behind and one 77 behind both read as 0.00%, which is no use to read or to filter on.
+    const found = alternatives(cfg(WIDE_SEARCH));
+    const distinct = new Set(found.map((d) => d.scoreDifference));
+
+    expect(found.length).toBeGreaterThan(2);
+    expect(distinct.size).toBeGreaterThan(2);
+  });
+
+  test("two alternatives describing the same swap are shown once", () => {
+    // The same enchant on either ring is one decision, not two.
+    const found = alternatives(cfg(WIDE_SEARCH));
+    const described = found.map((d) => [
+      d.items.map((i) => i.id).sort().join(","),
+      [...d.gems].sort().join(","),
+      d.enchants.map((e) => e.name).sort().join(","),
+      [...d.runes].sort().join(","),
+      (d.consumables || []).map((c) => c.name).sort().join(","),
+    ].join("|"));
+
+    expect(new Set(described).size).toEqual(described.length);
   });
 
   test("every alternative still says something about itself", () => {
