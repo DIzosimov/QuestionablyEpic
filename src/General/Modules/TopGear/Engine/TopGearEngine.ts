@@ -585,8 +585,17 @@ export function runTopGearShard(rawItemList: Item[], wepCombos: Item[], player: 
       // Evaluated wearing the player's own gems rather than the ones Top Gear would socket. The upgrade figure is
       // meant to answer "how much better is this than what I have on", and re-gemming the baseline made a run that
       // changed no gear at all still report an upgrade - the gain was the engine re-gemming both sides differently.
-      const equippedSet = evalSet(new ItemSet(-1, equippedItems, 0, player.spec), newPlayer, contentType, baseHPS,
-                                  userSettings, newCastModel, false, 0, undefined, undefined, undefined, undefined, true);
+      //
+      // The same applies to consumables, and more sharply. Searching two potions left the baseline on whatever the
+      // settings dropdown said - usually none - while every candidate carried the better one, so the potion's
+      // whole value was counted as a gear upgrade. The baseline gets the same choice of consumables, so what's
+      // left is the difference the gear actually makes.
+      const equippedSet = (buildConsumableCombinations(userSettings, Infinity) as any[])
+        .concat([undefined])
+        .map((consumables) => evalSet(new ItemSet(-1, equippedItems, 0, player.spec), newPlayer, contentType, baseHPS,
+                                      userSettings, newCastModel, false, 0, undefined, undefined, undefined,
+                                      consumables, true))
+        .reduce((best: any, set: any) => ((set.setHPS || 0) > (best.setHPS || 0) ? set : best));
       equippedHPS = equippedSet.setHPS || 0;
     }
   } catch (err) {
@@ -709,10 +718,29 @@ export function finishTopGear(shards: TopGearShardResult[], player: Player, cont
   // Sets that come out wearing exactly what the best set wears are skipped rather than shown: a row with a score
   // and nothing beside it tells the player nothing. Sets with fewer sockets than the largest one can be gemmed
   // identically by more than one loadout, so a few of these reach here even with the expansion behaving.
+  // Sets that differ only in which gems they wear outnumber everything else by orders of magnitude, and most are
+  // worth a hundredth of a percent. Left alone they fill the list and bury the decisions worth making - a
+  // different trinket, a different enchant, a different potion. So a gem-only alternative has to be worth
+  // something to be shown at all, and only a few are kept however many there are.
+  const GEM_ONLY_THRESHOLD = 0.05;  // percent
+  const GEM_ONLY_SHOWN = 3;
+  let gemOnlyShown = 0;
+
   for (var k = 1; k < resultSets.length && differentials.length < CONSTRAINTS.Shared.topGearDifferentials; k++) {
     const differential = buildDifferential(resultSets[k], primeSet, newPlayer, contentType, castModel.modelType[contentType] || "Default");
-    const swaps = differential.items.length + differential.gems.length + differential.enchants.length + differential.runes.length;
-    if (swaps > 0) differentials.push(differential);
+    const swaps = differential.items.length + differential.gems.length + differential.enchants.length +
+                  differential.runes.length + differential.consumables.length;
+    if (swaps === 0) continue;
+
+    const gemOnly = differential.gems.length > 0 && differential.items.length === 0 &&
+                    differential.enchants.length === 0 && differential.runes.length === 0 &&
+                    differential.consumables.length === 0;
+    if (gemOnly) {
+      if (gemOnlyShown >= GEM_ONLY_SHOWN || Math.abs(differential.scoreDifference) < GEM_ONLY_THRESHOLD) continue;
+      gemOnlyShown += 1;
+    }
+
+    differentials.push(differential);
   }
 
   // == Return sets ==
@@ -1079,6 +1107,9 @@ function forEachGearSet(itemList: Item[], rawWepCombos: Item[], spec: string, on
   return built;
 }
 
+// The keys the enchant breakdown uses for consumables rather than for a gear slot.
+const CONSUMABLE_KINDS = ["flask", "food", "potion", "oil", "rune"];
+
 function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, contentType: contentTypes, castModelType: string) {
   let doubleSlot: {[key: string]: number} = {};
   const primeList = primeSet.itemList;
@@ -1100,6 +1131,9 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
     // that only compared items and gems rendered those as an empty row with a score and no explanation.
     enchants: [] as { slot: string; name: string }[],
     runes: [] as string[],
+    // Flask, food, potion and the rest. Reported apart from enchants so the report can say which kind of decision
+    // an alternative actually represents.
+    consumables: [] as { kind: string; name: string }[],
     scoreDifference: ((Math.round(primeSet.hardScore - itemSet.hardScore) / primeSet.hardScore) * 100 * modelDiff),
     rawDifference: Math.round(((itemSet.hardScore - primeSet.hardScore) / primeSet.hardScore) * player.getHPS(contentType) * modelDiff),
 
@@ -1148,13 +1182,18 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
     if (diffGemCounts[gem] > (primeGemCounts[gem] || 0)) differentials.gems.push(Number(gem));
   });
 
-  // Check for enchant differences. Every other key in the breakdown is a slot holding one enchant name.
-  Object.keys(itemSet.enchantBreakdown).forEach((slot) => {
-    if (slot === "Gems") return;
-    const chosen = itemSet.enchantBreakdown[slot];
-    if (typeof chosen === "string" && chosen !== primeSet.enchantBreakdown[slot]) {
-      differentials.enchants.push({ slot, name: chosen });
-    }
+  // Check for enchant and consumable differences. The breakdown holds both, keyed by slot for enchants and by
+  // kind for consumables, so they're separated here - a swapped potion reported as an enchant on a slot called
+  // "potion" reads as nonsense. The weapon appears three times under aliases; only the combined one is reported,
+  // or a single weapon enchant change shows up as three.
+  Object.keys(itemSet.enchantBreakdown).forEach((key) => {
+    if (key === "Gems" || key === "GemCount" || key === "1H Weapon" || key === "2H Weapon") return;
+
+    const chosen = itemSet.enchantBreakdown[key];
+    if (typeof chosen !== "string" || chosen === primeSet.enchantBreakdown[key]) return;
+
+    if (CONSUMABLE_KINDS.includes(key)) differentials.consumables.push({ kind: key, name: chosen });
+    else differentials.enchants.push({ slot: key, name: chosen });
   });
 
   // Check for Omnium Folio differences.

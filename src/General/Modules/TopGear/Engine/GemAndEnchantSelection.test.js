@@ -1650,3 +1650,75 @@ describe("Potions can be simmed against each other", () => {
     expect(searched.itemsCompared).toEqual(run(cfg()).itemsCompared * 2);
   });
 });
+
+/*
+  Making the close alternatives worth reading.
+
+  Sets that differ only in which gems they wear outnumber everything else by orders of magnitude and are mostly
+  worth a hundredth of a percent, so they filled the list and buried the decisions that matter - a different
+  trinket, enchant or potion. And consumables were reported as enchants on a slot called "potion", which reads as
+  nonsense.
+*/
+describe("Close alternatives say what kind of decision they are", () => {
+  const geared = () => {
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    GEAR.forEach(([id, slot]) => {
+      const item = new Item(id, "", slot, 0, "", 0, 330, "");
+      item.active = true;
+      item.isEquipped = true;
+      player.addActiveItem(item);
+    });
+    return player;
+  };
+
+  const alternatives = (settings) => {
+    const p = geared();
+    return runTopGear(p.activeItems, buildNewWepCombos(p, true), p, "Raid", p.getHPS("Raid"),
+                      settings, p.getActiveModel("Raid")).differentials;
+  };
+
+  test("a swapped potion is reported as a consumable, not as an enchant", () => {
+    const found = alternatives(cfg({ potionChoices: ["Light's Potential", "Potion of Recklessness"] }));
+    const consumables = found.flatMap((d) => d.consumables || []);
+
+    expect(consumables.length).toBeGreaterThan(0);
+    consumables.forEach((c) => expect(["flask", "food", "potion", "oil", "rune"]).toContain(c.kind));
+    // And nothing lands in enchants under a consumable's name.
+    found.flatMap((d) => d.enchants || []).forEach((e) => {
+      expect(["flask", "food", "potion", "oil", "rune"]).not.toContain(e.slot);
+    });
+  });
+
+  test("a weapon enchant swap is reported once, not three times", () => {
+    // The breakdown holds the weapon under three aliases; reporting all of them tripled every weapon swap.
+    const found = alternatives(cfg({ enchantChoices: { CombinedWeapon: ["Arcane Mastery", "Berserker's Rage"] } }));
+    const weapon = found.flatMap((d) => d.enchants || []).filter((e) => e.slot.includes("Weapon"));
+
+    weapon.forEach((e) => expect(e.slot).toEqual("CombinedWeapon"));
+  });
+
+  test("gem-only alternatives don't crowd out everything else", () => {
+    // Three gems over the set's sockets produces far more gem shuffles than the list can hold.
+    const found = alternatives(cfg({ selectedGems: [240898, 240890, 240914], gearVariantLimit: 0 }));
+    const gemOnly = found.filter((d) => d.gems.length > 0 && d.items.length === 0 && d.enchants.length === 0 &&
+                                        d.runes.length === 0 && (d.consumables || []).length === 0);
+
+    expect(gemOnly.length).toBeLessThanOrEqual(3);
+  });
+
+  test("a gem shuffle worth nothing isn't shown at all", () => {
+    const found = alternatives(cfg({ selectedGems: [240898, 240890, 240914], gearVariantLimit: 0 }));
+    const gemOnly = found.filter((d) => d.gems.length > 0 && d.items.length === 0 && d.enchants.length === 0);
+
+    gemOnly.forEach((d) => expect(Math.abs(d.scoreDifference)).toBeGreaterThanOrEqual(0.05));
+  });
+
+  test("every alternative still says something about itself", () => {
+    const found = alternatives(cfg({ selectedGems: [240898, 240890], gearVariantLimit: 0 }));
+
+    found.forEach((d) => {
+      const swaps = d.items.length + d.gems.length + d.enchants.length + d.runes.length + (d.consumables || []).length;
+      expect(swaps).toBeGreaterThan(0);
+    });
+  });
+});

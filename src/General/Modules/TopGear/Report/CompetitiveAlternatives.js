@@ -13,7 +13,8 @@ const swapChipStyle = {
   display: "flex", flexDirection: "column", justifyContent: "center",
 };
 
-const SWAP_SLOT_LABELS = { CombinedWeapon: "Weapon", Finger1: "Ring 1", Finger2: "Ring 2" };
+const SWAP_SLOT_LABELS = {
+  flask: "Flask", food: "Food", potion: "Potion", oil: "Oil", rune: "Vantus", CombinedWeapon: "Weapon", Finger1: "Ring 1", Finger2: "Ring 2" };
 
 function CompetitiveAlternatives(props) {
   const { t, i18n } = useTranslation();
@@ -151,6 +152,16 @@ function CompetitiveAlternatives(props) {
                             <div style={swapChipStyle}>
                               <span style={{ color: "rgba(255,255,255,0.45)" }}>Folio</span>
                               <div style={{ color: "#d8a657" }}>{rune}</div>
+                            </div>
+                          </Grid>
+                        ))}
+                        {/* Flask, food and potion. Kept apart from enchants: a swapped potion labelled as an
+                            enchant on a slot called "potion" reads as nonsense. */}
+                        {(key.consumables || []).map((consumable, i) => (
+                          <Grid item key={"consumable" + i}>
+                            <div style={swapChipStyle}>
+                              <span style={{ color: "rgba(255,255,255,0.45)" }}>{SWAP_SLOT_LABELS[consumable.kind] || consumable.kind}</span>
+                              <div style={{ color: "#c58af9" }}>{consumable.name}</div>
                             </div>
                           </Grid>
                         ))}
