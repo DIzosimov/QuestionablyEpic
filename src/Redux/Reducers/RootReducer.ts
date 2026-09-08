@@ -91,6 +91,10 @@ const initialState : RootState = {
     // Flasks and food are searchable too. Empty means the single choice in the consumables settings below stands,
     // which is what an untouched profile has, so nothing changes until the player pins something.
     flaskChoices: {value: [], options: ["Haste", "Crit", "Mastery", "Versatility"], category: "consumables", type: "hidden", gameType: "Retail"},
+    potionChoices: {value: [], options: ["Light's Potential", "Potion of Recklessness", "None"], category: "consumables", type: "hidden", gameType: "Retail"},
+    // Which potion a plain run assumes. Both last 30s on a five minute cooldown, so both are counted at a tenth
+    // of the fight - see POTION_UPTIME.
+    potionChoice: {value: "None", options: ["Light's Potential", "Potion of Recklessness", "None"], category: "consumables", type: "selector", gameType: "Retail"},
     foodChoices: {value: [], options: ["Intellect Food", "Amani Cornucopia", "None"], category: "consumables", type: "hidden", gameType: "Retail"},
     // Slot 4 is the Folio's secondary stat slot and the only one worth choosing between - see FOLIO_SLOT_SETTINGS.
     // It holds a list of pinned runes; empty is Automatic. The bare string it used to hold is still accepted,

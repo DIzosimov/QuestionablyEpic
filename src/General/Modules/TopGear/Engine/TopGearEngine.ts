@@ -1,3 +1,4 @@
+import { getHighestStat, getLowestStat } from "Retail/Engine/EffectFormulas/EffectUtilities";
 import { planCrestSpending, UpgradeStep, PlannedPurchase, CrestBudget } from "./CrestSpending";
 import ItemSet from "../ItemSet";
 import TopGearResult from "./TopGearResult";
@@ -362,6 +363,27 @@ export function getEnchantSearchSpace(userSettings: any, spec: string): any {
 export const CONSUMABLE_OPTIONS: { [key: string]: string[] } = {
   flask: ["Haste", "Crit", "Mastery", "Versatility"],
   food: ["Intellect Food", "Amani Cornucopia", "None"],
+  potion: ["Light's Potential", "Potion of Recklessness", "None"],
+};
+
+// Both potions last 30 seconds on a five minute cooldown, so a tenth of the fight. Their stats are scaled by that
+// rather than counted in full - a flask is up the whole time, and a potion counted flat would look ten times the
+// buff it is next to one.
+export const POTION_UPTIME = 30 / 300;
+
+/**
+ * What each potion grants, before uptime.
+ *
+ * `bestSecondary` and `worstSecondary` are the secondaries the character has the most and least of by rating,
+ * which is what the in-game wording means. That is deliberately not the same as the BEST_SECONDARY marker the
+ * enchants and food use, which follows the spec's stat weights - a potion that reads "your highest secondary
+ * stat" takes whichever rating is largest, whether or not the spec values it most.
+ *
+ * Adding a potion is a row here plus a name in CONSUMABLE_OPTIONS.
+ */
+export const POTION_BUFFS: { [name: string]: { [stat: string]: number } } = {
+  "Light's Potential": { intellect: 695 },
+  "Potion of Recklessness": { bestSecondary: 1725, worstSecondary: -232 },
 };
 
 /**
@@ -375,7 +397,7 @@ export const FOOD_BUFFS: { [name: string]: { stat: string; amount: number } } = 
   "Amani Cornucopia": { stat: "bestSecondary", amount: 71.5 },
 };
 
-const CONSUMABLE_SETTINGS: { [key: string]: string } = { flask: "flaskChoices", food: "foodChoices" };
+const CONSUMABLE_SETTINGS: { [key: string]: string } = { flask: "flaskChoices", food: "foodChoices", potion: "potionChoices" };
 
 /** The flasks and food a run will try. Empty on an axis means the single choice in the settings panel stands. */
 export function getConsumableSearchSpace(userSettings: any): any {
@@ -1485,6 +1507,22 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
 
     consumableStats[stat] = (consumableStats[stat] ?? 0) + food.amount;
     enchants.food = foodName;
+  }
+
+  // Potion. See POTION_BUFFS for what each one grants, and POTION_UPTIME for why it isn't counted in full.
+  const potionChoice = getChosenConsumable(userSettings, "potion", consumableOverride) || getSetting(userSettings, "potionChoice");
+  if (typeof potionChoice === "string" && POTION_BUFFS[potionChoice]) {
+    // Taken from the character's own ratings rather than the spec's weights, which is what the potions say.
+    const ratings = compileStats({ ...setStats }, bonus_stats);
+    const highest = getHighestStat(ratings);
+    const lowest = getLowestStat(ratings);
+
+    Object.entries(POTION_BUFFS[potionChoice]).forEach(([stat, amount]) => {
+      const target = stat === "bestSecondary" ? highest : stat === "worstSecondary" ? lowest : stat;
+      if (!target) return;
+      consumableStats[target] = (consumableStats[target] ?? 0) + amount * POTION_UPTIME;
+    });
+    enchants.potion = potionChoice;
   }
 
   // Weapon Oil

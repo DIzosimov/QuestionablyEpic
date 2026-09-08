@@ -286,6 +286,10 @@ export default function GearOptionsSelector(props: any) {
           {select("Food", settingValue("foodChoices", []) || [], (v) => updateSetting("foodChoices", v),
                   CONSUMABLE_OPTIONS.food.map((food) => ({ value: food, label: food })),
                   { multiple: true, grid: { xs: 12, sm: 6, md: 4 }, helper: "Amani Cornucopia gives your best secondary instead of intellect." })}
+          {select("Potion", settingValue("potionChoices", []) || [], (v) => updateSetting("potionChoices", v),
+                  CONSUMABLE_OPTIONS.potion.map((potion) => ({ value: potion, label: potion })),
+                  { multiple: true, grid: { xs: 12, sm: 6, md: 4 },
+                    helper: "Counted at a tenth of the fight: 30 seconds on a five minute cooldown." })}
         </>
       ))}
 

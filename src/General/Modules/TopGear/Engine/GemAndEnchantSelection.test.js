@@ -1006,7 +1006,9 @@ describe("Flasks and food can be multi-selected", () => {
   test("Optimize Everything searches every flask and both food states", () => {
     const all = cfg({ detailedGearOptions: false, optimizeAllGearOptions: true });
     expect(getConsumableSearchSpace(all)).toEqual(CONSUMABLE_OPTIONS);
-    expect(countConsumableCombinations(all)).toEqual(CONSUMABLE_OPTIONS.flask.length * CONSUMABLE_OPTIONS.food.length);
+    // Every consumable axis multiplies in, potions included.
+    expect(countConsumableCombinations(all))
+      .toEqual(Object.values(CONSUMABLE_OPTIONS).reduce((total, options) => total * options.length, 1));
   });
 });
 
@@ -1580,5 +1582,71 @@ describe("Gems aren't searched when every socket is keeping what it has", () => 
 
     // Still wearing the character's own gems, which is what keeping them meant.
     expect(best.enchantBreakdown["Gems"].slice(1).every((gem) => gem === 240890)).toBe(true);
+  });
+});
+
+/*
+  Potions. Both last 30 seconds on a five minute cooldown, so both are counted at a tenth of the fight - a flask
+  is up the whole time, and a potion counted in full would look ten times the buff it is beside one.
+*/
+describe("Potions can be simmed against each other", () => {
+  const { POTION_BUFFS, POTION_UPTIME, CONSUMABLE_OPTIONS: OPTIONS } = require("./TopGearEngine");
+
+  const stats = (settings) => run(settings).itemSet.setStats;
+
+  test("both potions are offered, and neither is assumed by default", () => {
+    expect(OPTIONS.potion).toEqual(["Light's Potential", "Potion of Recklessness", "None"]);
+    expect(base.potionChoice.value).toEqual("None");
+  });
+
+  test("Light's Potential grants primary stat, scaled by its uptime", () => {
+    const none = stats(cfg({ potionChoice: "None" }));
+    const withIt = stats(cfg({ potionChoice: "Light's Potential" }));
+
+    expect(POTION_BUFFS["Light's Potential"].intellect).toEqual(695);
+    expect(withIt.intellect).toBeGreaterThan(none.intellect);
+    // A tenth of 695, then the 5% armour bonus and any talents on top - so more than a tenth, never the full 695.
+    expect(withIt.intellect - none.intellect).toBeLessThan(695);
+  });
+
+  test("Recklessness gives with one hand and takes with the other", () => {
+    const none = stats(cfg({ potionChoice: "None" }));
+    const withIt = stats(cfg({ potionChoice: "Potion of Recklessness" }));
+
+    const gained = ["crit", "haste", "mastery", "versatility"].filter((s) => (withIt[s] || 0) > (none[s] || 0));
+    const lost = ["crit", "haste", "mastery", "versatility"].filter((s) => (withIt[s] || 0) < (none[s] || 0));
+
+    expect(gained).toHaveLength(1);
+    expect(lost).toHaveLength(1);
+    expect(gained[0]).not.toEqual(lost[0]);
+  });
+
+  test("it takes from the lowest rating, not the lowest weight", () => {
+    // The wording is about the character's ratings, which is why it doesn't use the marker the enchants follow.
+    expect(POTION_BUFFS["Potion of Recklessness"].worstSecondary).toEqual(-232);
+    expect(POTION_BUFFS["Potion of Recklessness"].bestSecondary).toEqual(1725);
+  });
+
+  test("a tenth of the fight, not the whole of it", () => {
+    expect(POTION_UPTIME).toBeCloseTo(0.1, 5);
+  });
+
+  test("no potion leaves the set exactly as it was", () => {
+    const none = stats(cfg({ potionChoice: "None" }));
+    const unset = stats(cfg());
+
+    expect(none).toEqual(unset);
+  });
+
+  test("an unrecognised potion is ignored rather than crashing a run", () => {
+    expect(stats(cfg({ potionChoice: "Potion of Nonsense" }))).toEqual(stats(cfg({ potionChoice: "None" })));
+  });
+
+  test("searching both ranks them against each other", () => {
+    const searched = run(cfg({ potionChoices: ["Light's Potential", "Potion of Recklessness"] }));
+
+    expect(["Light's Potential", "Potion of Recklessness"]).toContain(searched.itemSet.enchantBreakdown["potion"]);
+    // Two potions is two candidate sets per gear set.
+    expect(searched.itemsCompared).toEqual(run(cfg()).itemsCompared * 2);
   });
 });

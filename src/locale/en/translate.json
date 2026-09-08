@@ -556,7 +556,11 @@
           "title": "Myth Crests",
           "tooltip": "How many Myth crests to plan with. Filled in from your SimC import; change it to see what a plan looks like with crests you haven't earned yet."
         },
-        "crests": "Crests"
+        "crests": "Crests",
+        "potionChoice": {
+          "title": "Potion",
+          "tooltip": "Which potion to assume. Both last 30 seconds on a five minute cooldown, so their stats are counted at a tenth of the fight rather than in full."
+        }
       },
       "SettingsTitle": "Optional Settings"
     },
