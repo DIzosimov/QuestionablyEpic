@@ -534,7 +534,28 @@
         "crestSpending": {
           "title": "Plan Crest Spending",
           "tooltip": "Works out which upgrades to buy with the crests you have, in the order to buy them, ranked by healing gained per crest. Needs the crest costs for the current season, which aren't in the app yet."
-        }
+        },
+        "crestsAdventurer": {
+          "title": "Adventurer Crests",
+          "tooltip": "How many Adventurer crests to plan with. Filled in from your SimC import; change it to see what a plan looks like with crests you haven't earned yet."
+        },
+        "crestsVeteran": {
+          "title": "Veteran Crests",
+          "tooltip": "How many Veteran crests to plan with. Filled in from your SimC import; change it to see what a plan looks like with crests you haven't earned yet."
+        },
+        "crestsChampion": {
+          "title": "Champion Crests",
+          "tooltip": "How many Champion crests to plan with. Filled in from your SimC import; change it to see what a plan looks like with crests you haven't earned yet."
+        },
+        "crestsHero": {
+          "title": "Hero Crests",
+          "tooltip": "How many Hero crests to plan with. Filled in from your SimC import; change it to see what a plan looks like with crests you haven't earned yet."
+        },
+        "crestsMyth": {
+          "title": "Myth Crests",
+          "tooltip": "How many Myth crests to plan with. Filled in from your SimC import; change it to see what a plan looks like with crests you haven't earned yet."
+        },
+        "crests": "Crests"
       },
       "SettingsTitle": "Optional Settings"
     },

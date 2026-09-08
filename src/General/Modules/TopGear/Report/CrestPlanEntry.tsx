@@ -15,6 +15,8 @@ type Purchase = {
 
 interface CrestPlanEntryProps {
   plan?: Purchase[];
+  // What the plan was allowed to spend, so an amount typed into the crest boxes isn't invisible.
+  budget?: { [currencyID: number]: number };
   language?: string;
   gameType?: gameTypes;
 }
@@ -28,7 +30,7 @@ interface CrestPlanEntryProps {
  * Drawn only when there's a plan. The option is off by default, and a character whose gear is all at its track cap
  * has nothing to buy, so an empty list is the common case and shouldn't leave a bare heading behind.
  */
-export default function CrestPlanEntry({ plan = [], language = "en", gameType = "Retail" }: CrestPlanEntryProps) {
+export default function CrestPlanEntry({ plan = [], budget = {}, language = "en", gameType = "Retail" }: CrestPlanEntryProps) {
   if (plan.length === 0) return null;
 
   const total = Object.entries(plan[plan.length - 1].spent || {})
@@ -109,7 +111,15 @@ export default function CrestPlanEntry({ plan = [], language = "en", gameType = 
           </>
         ) : null}
 
-        <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)" }}>{"Total: " + total}</Typography>
+        <Typography variant="caption" style={{ color: "rgba(255,255,255,0.75)", display: "block" }}>{"Total: " + total}</Typography>
+        {Object.keys(budget).length > 0 ? (
+          <Typography variant="caption" style={{ color: "rgba(255,255,255,0.55)" }}>
+            {"Planned with: " + Object.entries(budget)
+              .filter(([, amount]) => amount > 0)
+              .map(([currencyID, amount]) => amount + " " + (CREST_CURRENCIES[Number(currencyID)] || currencyID))
+              .join(", ")}
+          </Typography>
+        ) : null}
       </Paper>
     </Grid>
   );

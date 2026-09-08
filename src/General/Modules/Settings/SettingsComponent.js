@@ -9,7 +9,7 @@ import { togglePlayerSettings } from "Redux/Actions";
 // Any category listed here is rendered. A setting whose category is missing from this list exists in the store
 // but is never drawn, which is silent - SettingsCategories.test.js guards against that.
 export const SETTINGS_CATEGORIES = {
-  Retail: ["trinkets", "embellishments", "topGear", "consumables", "upgradeFinder", "specSpecific"],
+  Retail: ["trinkets", "embellishments", "topGear", "crests", "consumables", "upgradeFinder", "specSpecific"],
   Classic: ["topGear", "enchants", "specSpecific"],
 };
 

@@ -300,7 +300,9 @@ function displayReport(
   });
 
   // Absent unless the player asked for a plan, and empty when nothing is affordable or everything is capped.
-  const crestPlan = result.crestPlan || [];
+  // Older reports stored the plan as a bare list, before the budget travelled with it.
+  const crestPlan = Array.isArray(result.crestPlan) ? { budget: {}, purchases: result.crestPlan }
+                                                    : (result.crestPlan || { budget: {}, purchases: [] });
 
   // Gem position isn't modelled: the engine picks one multiset for the whole set and the report hands them out in
   // slot order, so which item ends up with which gem is an artefact of that ordering. A gem therefore only counts
@@ -524,7 +526,7 @@ function displayReport(
                     </Grid>
                   </Grid>
 
-                  <CrestPlanEntry plan={crestPlan} language={currentLanguage} gameType={gameType} />
+                  <CrestPlanEntry plan={crestPlan.purchases} budget={crestPlan.budget} language={currentLanguage} gameType={gameType} />
 
                   <Grid item xs={12}>
                     {/* The cards mark what to change; without a key a gold ring is just a mystery. */}

@@ -1,4 +1,4 @@
-import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData } from "Databases/CrestDB";
+import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData, CREST_CURRENCIES } from "Databases/CrestDB";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                        Crest spending                                          */
@@ -33,6 +33,30 @@ export type PlannedPurchase = UpgradeStep & {
 };
 
 export type CrestBudget = { [currencyID: number]: number };
+
+/** The setting that overrides how many of a crest the character is treated as having. */
+export const crestSettingKey = (crest: string): string => "crests" + crest;
+
+/**
+ * What the plan is allowed to spend.
+ *
+ * The crest boxes are seeded from the SimC import and edited from there, so they are the budget. What the import
+ * read is only a fallback, for a character imported before those boxes existed.
+ */
+export function crestBudget(held: CrestBudget = {}, userSettings: any = {}): CrestBudget {
+  const budget: CrestBudget = { ...held };
+
+  Object.entries(CREST_CURRENCIES).forEach(([currencyID, crest]) => {
+    const setting = (userSettings || {})[crestSettingKey(crest)];
+    const raw = setting && typeof setting === "object" ? setting.value : setting;
+    // The settings panel writes number fields through as strings.
+    const amount = typeof raw === "string" ? parseInt(raw, 10) : raw;
+
+    if (typeof amount === "number" && !isNaN(amount) && amount >= 0) budget[Number(currencyID)] = amount;
+  });
+
+  return budget;
+}
 
 /** Every rank an item could still be pushed through, cheapest first. */
 export function upgradeStepsFor(item: any): UpgradeStep[] {

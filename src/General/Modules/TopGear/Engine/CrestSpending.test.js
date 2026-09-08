@@ -170,3 +170,53 @@ describe("What an upgrade really costs", () => {
     expect(hasCrestData()).toBe(true);
   });
 });
+
+/*
+  The crest budget a plan is allowed to spend.
+
+  The boxes in the settings are seeded from the SimC import and edited from there, so they are the budget - which
+  is what lets a plan be tried against crests not earned yet without touching the character.
+*/
+describe("Deciding what a plan may spend", () => {
+  const { crestBudget, crestSettingKey } = jest.requireActual("./CrestSpending");
+  const { CREST_CURRENCIES } = jest.requireActual("Databases/CrestDB");
+  const HERO = 3445, MYTH = 3446;
+
+  const settings = (amounts) => Object.fromEntries(
+    Object.entries(amounts).map(([crest, value]) => [crestSettingKey(crest), { value }]));
+
+  test("a crest setting is named after its tier", () => {
+    Object.values(CREST_CURRENCIES).forEach((crest) => {
+      expect(crestSettingKey(crest)).toEqual("crests" + crest);
+    });
+  });
+
+  test("what's in the boxes is what gets spent", () => {
+    expect(crestBudget({}, settings({ Hero: 100, Myth: 84 }))[HERO]).toEqual(100);
+    expect(crestBudget({}, settings({ Hero: 100, Myth: 84 }))[MYTH]).toEqual(84);
+  });
+
+  test("a box overrides what the import read", () => {
+    // The point of the boxes: plan against crests you don't have yet.
+    expect(crestBudget({ [HERO]: 25 }, settings({ Hero: 500 }))[HERO]).toEqual(500);
+  });
+
+  test("zero is a real answer, not a missing one", () => {
+    // Asking what a plan looks like with none of a tier has to be possible.
+    expect(crestBudget({ [HERO]: 100 }, settings({ Hero: 0 }))[HERO]).toEqual(0);
+  });
+
+  test("the panel writes numbers through as strings", () => {
+    expect(crestBudget({}, settings({ Hero: "60" }))[HERO]).toEqual(60);
+    expect(crestBudget({ [HERO]: 25 }, settings({ Hero: "nonsense" }))[HERO]).toEqual(25);
+  });
+
+  test("a character imported before the boxes existed still has a budget", () => {
+    expect(crestBudget({ [HERO]: 25, [MYTH]: 84 }, {})).toEqual({ [HERO]: 25, [MYTH]: 84 });
+  });
+
+  test("no import and no boxes is an empty budget, not a crash", () => {
+    expect(crestBudget()).toEqual({});
+    expect(crestBudget(undefined, undefined)).toEqual({});
+  });
+});

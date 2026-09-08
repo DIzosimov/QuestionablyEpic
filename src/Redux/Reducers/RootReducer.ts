@@ -64,10 +64,18 @@ const initialState : RootState = {
     optimizeAllGearOptions: {value: false, options: [true, false], category: "topGear", type: "hidden", gameType: "Retail"},
     selectedGems: {value: [], options: [], category: "gems", type: "hidden", gameType: "Retail"},
     selectedMetaGem: {value: 0, options: [], category: "gems", type: "hidden", gameType: "Retail"},
+    // How many of each crest to plan with. Seeded from the SimC import so they show what the character actually
+    // has, and editable from there to ask what a plan looks like with crests not earned yet.
+    // type "Entry" renders as a number field rather than a dropdown.
+    crestsAdventurer: {value: 0, options: [], category: "crests", type: "Entry", gameType: "Retail"},
+    crestsVeteran: {value: 0, options: [], category: "crests", type: "Entry", gameType: "Retail"},
+    crestsChampion: {value: 0, options: [], category: "crests", type: "Entry", gameType: "Retail"},
+    crestsHero: {value: 0, options: [], category: "crests", type: "Entry", gameType: "Retail"},
+    crestsMyth: {value: 0, options: [], category: "crests", type: "Entry", gameType: "Retail"},
     // Plan what to spend crests on alongside the run. Its own option rather than part of the replace toggle above:
     // that one is about what Top Gear may change for free, this is about what the character can afford to buy.
     // Off by default - it needs the crest cost data in CrestDB, which the app doesn't carry yet.
-    crestSpending: {value: false, options: [true, false], category: "topGear", type: "selector", gameType: "Retail"},
+    crestSpending: {value: false, options: [true, false], category: "crests", type: "selector", gameType: "Retail"},
     // Answers "am I willing to re-gem, re-enchant and re-rune", which is a question about the run itself rather
     // than about pinning individual choices. Off keeps the gems, enchants and runes the character already has and
     // only fills what's empty. Rendered as a switch on the settings header beside Optimize Everything (see

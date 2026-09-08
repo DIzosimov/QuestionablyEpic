@@ -44,8 +44,11 @@ type ShortReport = {
   embellishedSelected?: number; // Drives the "only two embellishments can be worn" note in the report.
   equippedHPS?: number; // Throughput of the player's current gear, for the upgrade percentage.
   // What to spend crests on, in the order to spend it. Absent unless the player asked for it.
-  crestPlan?: { id: number; slot: string; fromLevel: number; toLevel: number; crest: string; crests: number;
-                gain: number; spent: { [currencyID: number]: number } }[];
+  crestPlan?: {
+    budget: { [currencyID: number]: number };
+    purchases: { id: number; slot: string; fromLevel: number; toLevel: number; crest: string; crests: number;
+                 gain: number; spent: { [currencyID: number]: number } }[];
+  };
   itemSet: {
     itemList: any[]; // TODO: Replace with Item
     setStats: any; // TODO: Replace with nice stat object.
@@ -585,16 +588,23 @@ export default function TopGear(props: any) {
     const items = hashes.map((hash) => props.player.getItemByHash(hash)[0]).filter(Boolean);
     if (items.length === 0) return undefined;
 
-    const budget = (props.player.upgradeCurrency || {}).currencies || {};
+    // What the import read, with anything typed into the crest boxes over the top - so a plan can be tried
+    // against crests not earned yet without touching the character.
+    const { crestBudget } = await import("./Engine/CrestSpending");
+    const budget = crestBudget((props.player.upgradeCurrency || {}).currencies || {}, playerSettings);
     const plan = planUpgrades(items, props.player, contentType, baseHPS, playerSettings,
                               props.player.getActiveModel(contentType), budget);
 
-    return plan.map((purchase: any) => ({
-      id: purchase.item.id, slot: purchase.item.slot,
-      fromLevel: purchase.fromLevel, toLevel: purchase.toLevel,
-      crest: purchase.crest, crests: purchase.crests,
-      gain: Math.round(purchase.gain), spent: purchase.spent,
-    }));
+    return {
+      // Carried so the report can say what it planned against - otherwise an overridden budget is invisible.
+      budget,
+      purchases: plan.map((purchase: any) => ({
+        id: purchase.item.id, slot: purchase.item.slot,
+        fromLevel: purchase.fromLevel, toLevel: purchase.toLevel,
+        crest: purchase.crest, crests: purchase.crests,
+        gain: Math.round(purchase.gain), spent: purchase.spent,
+      })),
+    };
   };
 
   const shortenReport = (report: TopGearResult, player: Player, itemList: Item[]) => {
