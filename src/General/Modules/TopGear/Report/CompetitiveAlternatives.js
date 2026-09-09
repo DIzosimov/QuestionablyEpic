@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Paper, Typography, Divider, Grid } from "@mui/material";
-import { getGemIcon, getItemIcon, getItemProp } from "../../../Engine/ItemUtilities";
+import { getGemIcon, getGemProp, getItemIcon, getItemProp } from "../../../Engine/ItemUtilities";
 import { useSelector } from "react-redux";
 import WowheadTooltip from "General/Modules/GeneralComponents/WHTooltips.tsx";
 import { reforgeIDs } from "Databases/ReforgeDB";
@@ -165,7 +165,22 @@ function CompetitiveAlternatives(props) {
                             </div>
                           </Grid>
                         ))}
-                        {key.gems.map((gem, i) => {
+                        {/* Which socket each gem would go in. Position isn't modelled - any socket takes any gem -
+                            but this is the same assignment the item cards show, so it reads as a place to put it
+                            rather than a loose gem with no home. */}
+                        {(key.gemSlots || []).map((gem, i) => (
+                          <Grid item key={"gemslot" + i}>
+                            <div style={swapChipStyle}>
+                              <span style={{ color: "rgba(255,255,255,0.45)" }}>{SWAP_SLOT_LABELS[gem.slot] || gem.slot}</span>
+                              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <img alt="img" width={16} height={16} src={getGemIcon(gem.id, gameType)}
+                                     style={{ borderRadius: 2, verticalAlign: "middle" }} />
+                                <span style={{ color: "#c9a0dc" }}>{getGemProp(gem.id, "name")}</span>
+                              </div>
+                            </div>
+                          </Grid>
+                        ))}
+                        {(key.gemSlots || []).length > 0 ? null : key.gems.map((gem, i) => {
                           let itemArray = [];
                           // 
                           itemArray = [gem];

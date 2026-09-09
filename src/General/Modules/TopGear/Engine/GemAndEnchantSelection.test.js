@@ -1697,13 +1697,27 @@ describe("Close alternatives say what kind of decision they are", () => {
     weapon.forEach((e) => expect(e.slot).toEqual("CombinedWeapon"));
   });
 
-  test("gem-only alternatives don't crowd out everything else", () => {
-    // Three gems over the set's sockets produces far more gem shuffles than the list can hold.
+  test("a gem alternative says which socket the gem goes in", () => {
+    // A bare gem icon says what to buy but not where it goes, and a set with four sockets makes that a question.
     const found = alternatives(cfg({ selectedGems: [240898, 240890, 240914], gearVariantLimit: 0 }));
-    const gemOnly = found.filter((d) => d.gems.length > 0 && d.items.length === 0 && d.enchants.length === 0 &&
-                                        d.runes.length === 0 && (d.consumables || []).length === 0);
+    const withGems = found.filter((d) => d.gems.length > 0);
 
-    expect(gemOnly.length).toBeLessThanOrEqual(3);
+    expect(withGems.length).toBeGreaterThan(0);
+    withGems.forEach((d) => {
+      expect(d.gemSlots.length).toEqual(d.gems.length);
+      d.gemSlots.forEach((gem) => {
+        expect(typeof gem.slot).toEqual("string");
+        expect(gem.slot.length).toBeGreaterThan(0);
+        expect(d.gems).toContain(gem.id);
+      });
+    });
+  });
+
+  test("the socket is one the set actually has", () => {
+    const found = alternatives(cfg({ selectedGems: [240898, 240890, 240914], gearVariantLimit: 0 }));
+    const slots = ["Head", "Neck", "Wrist", "Waist", "Finger1", "Finger2"];
+
+    found.flatMap((d) => d.gemSlots).forEach((gem) => expect(slots).toContain(gem.slot));
   });
 
   const WIDE_SEARCH = {
@@ -1715,11 +1729,11 @@ describe("Close alternatives say what kind of decision they are", () => {
     },
   };
 
-  test("nothing worth less than a twentieth of a percent is shown, whatever it changes", () => {
+  test("nothing worth less than a hundredth of a percent is shown, whatever it changes", () => {
     // Not just gem-only ones. A set that shuffles a gem and an enchant together used to slip past the filter
     // entirely, and those were the bulk of the list.
     alternatives(cfg(WIDE_SEARCH)).forEach((d) => {
-      expect(Math.abs(d.scoreDifference)).toBeGreaterThanOrEqual(0.05);
+      expect(Math.abs(d.scoreDifference)).toBeGreaterThanOrEqual(0.01);
     });
   });
 

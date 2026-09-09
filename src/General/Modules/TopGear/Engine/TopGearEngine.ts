@@ -721,11 +721,7 @@ export function finishTopGear(shards: TopGearShardResult[], player: Player, cont
   // An alternative earns its place by being worth reading. Anything under a twentieth of a percent isn't a
   // decision, it's rounding - and there are thousands of those, because a run that searches gems and enchants
   // produces a near-identical set for every arrangement of them.
-  const WORTH_SHOWING = 0.05;  // percent
-  // Gem shuffles outnumber everything else by orders of magnitude even above that floor, so only a few are kept
-  // however many clear it, leaving room for the trinket, enchant and potion swaps worth seeing.
-  const GEM_ONLY_SHOWN = 3;
-  let gemOnlyShown = 0;
+  const WORTH_SHOWING = 0.01;  // percent
   // Two alternatives describing the same swap - the same enchant on either ring, say - are one alternative.
   const alreadyShown = new Set<string>();
 
@@ -737,21 +733,13 @@ export function finishTopGear(shards: TopGearShardResult[], player: Player, cont
 
     const describes = [
       differential.items.map((item: any) => item.id).sort().join(","),
-      [...differential.gems].sort().join(","),
+      differential.gemSlots.map((gem: any) => gem.slot + ":" + gem.id).sort().join(","),
       differential.enchants.map((enchant: any) => enchant.name).sort().join(","),
       [...differential.runes].sort().join(","),
       differential.consumables.map((consumable: any) => consumable.name).sort().join(","),
     ].join("|");
     if (alreadyShown.has(describes)) continue;
     alreadyShown.add(describes);
-
-    const gemOnly = differential.gems.length > 0 && differential.items.length === 0 &&
-                    differential.enchants.length === 0 && differential.runes.length === 0 &&
-                    differential.consumables.length === 0;
-    if (gemOnly) {
-      if (gemOnlyShown >= GEM_ONLY_SHOWN) continue;
-      gemOnlyShown += 1;
-    }
 
     differentials.push(differential);
   }
@@ -1132,6 +1120,7 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
   let differentials: {
     items: Item[]; //
     gems: number[]; //
+    gemSlots: { slot: string; id: number }[];
     scoreDifference: number;
     rawDifference: number;
     hps: number;
@@ -1139,6 +1128,9 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
   } = {
     items: [],
     gems: [],
+    // The same gems, with the socket each would go in. Kept alongside rather than replacing the plain list, which
+    // the report still uses to draw the icons.
+    gemSlots: [] as { slot: string; id: number }[],
     // Enchants and Folio runes an alternative changes. Since sets expand into one candidate per gem, enchant and
     // rune combination, most close alternatives now differ by one of these and nothing else - and a differential
     // that only compared items and gems rendered those as an empty row with a score and no explanation.
@@ -1186,6 +1178,25 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
     }
   }
 
+  // Which socket each gem ends up in, the same way the report hands them out to the item cards: in slot order,
+  // each socketed piece taking the next gems. Position isn't modelled - the engine picks a multiset for the whole
+  // set and any socket would take any of them - so this is an assignment rather than a recommendation, but it's
+  // the same assignment the player sees on their gear, which is what makes an alternative act-on-able.
+  const gemsBySlot = (set: any): { slot: string; id: number }[] => {
+    const remaining = [...((set.enchantBreakdown || {})["Gems"] as number[] || [])];
+    const placed: { slot: string; id: number }[] = [];
+    let ringsSeen = 0;
+
+    (set.itemList || []).forEach((item: any) => {
+      const slot = item.slot === "Finger" ? "Finger" + ++ringsSeen : item.slot;
+      for (let i = 0; i < (item.socket || 0); i++) {
+        const gem = remaining.shift();
+        if (gem) placed.push({ slot, id: gem });
+      }
+    });
+    return placed;
+  };
+
   // Check for gem differences. A loadout is a multiset, so two sets can wear the same gems in different numbers -
   // comparing membership would read "three A one B" against "two A two B" as no difference at all. Count instead,
   // and report each gem this set wears more of than the best one does.
@@ -1194,8 +1205,19 @@ function buildDifferential(itemSet: ItemSet, primeSet: ItemSet, player: Player, 
 
   const primeGemCounts = gemCounts((primeSet.enchantBreakdown["Gems"] as number[]) || []);
   const diffGemCounts = gemCounts((itemSet.enchantBreakdown["Gems"] as number[]) || []);
-  Object.keys(diffGemCounts).forEach((gem: any) => {
-    if (diffGemCounts[gem] > (primeGemCounts[gem] || 0)) differentials.gems.push(Number(gem));
+  const extra = { ...diffGemCounts };
+  Object.keys(extra).forEach((gem: any) => { extra[gem] -= (primeGemCounts[gem] || 0); });
+
+  // Each gem this set wears more of than the best one does, with the socket it would go in - a bare gem icon
+  // tells the player what to buy but not where it goes, and a set with four sockets makes that a real question.
+  const placed = gemsBySlot(itemSet);
+  const primePlaced = gemsBySlot(primeSet);
+  placed.forEach((socket, i) => {
+    if (extra[socket.id] > 0 && (!primePlaced[i] || primePlaced[i].id !== socket.id)) {
+      extra[socket.id] -= 1;
+      differentials.gems.push(socket.id);
+      differentials.gemSlots.push(socket);
+    }
   });
 
   // Check for enchant and consumable differences. The breakdown holds both, keyed by slot for enchants and by
