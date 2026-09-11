@@ -257,3 +257,127 @@ describe("Offering candidates at the level they end up, not the level they drop"
     expect(candidateStates([], { maxCurrentGear: true })).toEqual([]);
   });
 });
+
+/*
+  WoWAudit conditions.
+
+  WoWAudit takes a report only if it was generated under a fixed set of conditions. Most of them the engine meets
+  and could not fail to meet; two are settings, and both have to be right or the report is rejected on submission
+  rather than here. The toggle sets them together and writes down what it did.
+*/
+describe("Running a report under WoWAudit conditions", () => {
+  const { reportConditions, wowAuditSettings, withFightLength, WOWAUDIT_FIGHT_LENGTH } = require("./UpgradeFinderEngine");
+
+  test("five minutes is 300 seconds, not QE's own 400", () => {
+    expect(WOWAUDIT_FIGHT_LENGTH).toBe(300);
+  });
+
+  describe("the settings it forces", () => {
+    test("it upgrades both sides of the comparison without being asked", () => {
+      // WoWAudit rejects a 1/6-against-finished comparison, so leaving this to the player to remember is a
+      // rejection waiting to happen.
+      expect(wowAuditSettings({ wowAudit: true }).maxCurrentGear).toBe(true);
+      expect(wowAuditSettings({ wowAudit: true, maxCurrentGear: false }).maxCurrentGear).toBe(true);
+    });
+
+    test("off, it changes nothing at all", () => {
+      const settings = { maxCurrentGear: false, raid: [3] };
+
+      expect(wowAuditSettings(settings)).toBe(settings);
+      expect(wowAuditSettings({})).toEqual({});
+      expect(wowAuditSettings(undefined)).toBe(undefined);
+    });
+
+    test("the rest of the settings survive", () => {
+      expect(wowAuditSettings({ wowAudit: true, raid: [3], dungeon: 10 })).toEqual({
+        wowAudit: true, raid: [3], dungeon: 10, maxCurrentGear: true,
+      });
+    });
+  });
+
+  describe("pinning the fight length", () => {
+    const { reportFightLength } = require("./UpgradeFinderEngine");
+
+    test("a WoWAudit report is scored at five minutes", () => {
+      expect(reportFightLength({ wowAudit: true })).toBe(WOWAUDIT_FIGHT_LENGTH);
+    });
+
+    test("every other report is left at whatever the character's model says", () => {
+      // 0 means "don't touch it" - not "a zero second fight".
+      expect(reportFightLength({ maxCurrentGear: true })).toBe(0);
+      expect(reportFightLength({})).toBe(0);
+      expect(reportFightLength(undefined)).toBe(0);
+    });
+
+    const model = (length) => ({ fightInfo: { fightLength: length } });
+
+    test("the run sees the pinned length", () => {
+      const castModel = model(400);
+      const seen = withFightLength(castModel, 300, () => castModel.fightInfo.fightLength);
+
+      expect(seen).toBe(300);
+    });
+
+    test("the model is put back afterwards", () => {
+      // It is the character's own model, shared with the rest of the app. Leaving it pinned would quietly
+      // rescore every other page.
+      const castModel = model(400);
+      withFightLength(castModel, 300, () => null);
+
+      expect(castModel.fightInfo.fightLength).toBe(400);
+    });
+
+    test("it is put back even when the run throws", () => {
+      const castModel = model(400);
+
+      expect(() => withFightLength(castModel, 300, () => { throw new Error("boom"); })).toThrow("boom");
+      expect(castModel.fightInfo.fightLength).toBe(400);
+    });
+
+    test("no pin leaves the model alone and still runs", () => {
+      const castModel = model(400);
+      const seen = withFightLength(castModel, 0, () => castModel.fightInfo.fightLength);
+
+      expect(seen).toBe(400);
+      expect(castModel.fightInfo.fightLength).toBe(400);
+    });
+
+    test("a model with no fight info is not a crash", () => {
+      expect(withFightLength(undefined, 300, () => "ran")).toBe("ran");
+      expect(withFightLength({}, 300, () => "ran")).toBe("ran");
+    });
+
+    test("the value it returns is the run's own", () => {
+      expect(withFightLength(model(400), 300, () => ["a", "b"])).toEqual(["a", "b"]);
+    });
+  });
+
+  describe("what the report says it was run under", () => {
+    test("an ordinary report claims nothing", () => {
+      expect(reportConditions({ maxCurrentGear: true })).toEqual([]);
+      expect(reportConditions({})).toEqual([]);
+      expect(reportConditions(undefined)).toEqual([]);
+    });
+
+    test("every condition on WoWAudit's list is accounted for", () => {
+      const listed = reportConditions({ wowAudit: true }).map((entry) => entry.condition);
+
+      expect(listed).toEqual(["Fight style", "Fight length", "Targets", "Power Infusion", "Vault sockets", "Equipped gear", "Candidates"]);
+    });
+
+    test("it states the length it actually ran at", () => {
+      const length = reportConditions({ wowAudit: true }).find((entry) => entry.condition === "Fight length");
+
+      expect(length.value).toBe("5 minutes");
+      expect(WOWAUDIT_FIGHT_LENGTH).toBe(5 * 60);
+    });
+
+    test("it says which conditions the toggle enforced and which merely hold", () => {
+      // The two it enforces are the two that could have been wrong. The rest the engine cannot do otherwise,
+      // and claiming to have enforced them would be claiming a check that does not exist.
+      const enforced = reportConditions({ wowAudit: true }).filter((entry) => entry.enforced).map((e) => e.condition);
+
+      expect(enforced).toEqual(["Fight length", "Equipped gear", "Candidates"]);
+    });
+  });
+});

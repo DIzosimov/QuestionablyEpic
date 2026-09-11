@@ -165,13 +165,96 @@ export function upgradeFinderBaseline(player, ufSettings) {
   return (ufSettings || {}).maxCurrentGear ? atTopOfTrack(equipped) : equipped;
 }
 
+/* ------------------------------------------------------------------------------------------------
+   WoWAudit compliance.
+
+   WoWAudit will only take a report generated under a fixed set of conditions, so that every player's
+   numbers mean the same thing. Most of them the Upgrade Finder already meets and could never not
+   meet - there is no AoE model to turn off, no Power Infusion modelled at all, candidates are never
+   given a socket, and each one is measured on its own against the baseline. Two are choices:
+   the gear has to be fully upgraded on both sides, and the fight has to be five minutes.
+
+   Rather than ask the player to set those separately and get one of them wrong, the toggle sets both
+   and stamps the finished report with what it was run under, so the conditions can be checked
+   against WoWAudit's list without taking anyone's word for it.
+------------------------------------------------------------------------------------------------ */
+
+// Five minutes, in seconds. QE's own default is 400s for a raid, which is not the same report.
+export const WOWAUDIT_FIGHT_LENGTH = 300;
+
+/**
+ * The conditions the report was run under, in WoWAudit's own terms.
+ *
+ * Two of these the toggle enforces; the rest hold because the engine has no way to do otherwise, and
+ * are listed so the report can be checked at a glance rather than trusted.
+ */
+export function reportConditions(ufSettings) {
+  if (!(ufSettings || {}).wowAudit) return [];
+
+  return [
+    { condition: "Fight style", value: "Patchwerk", enforced: false },
+    { condition: "Fight length", value: "5 minutes", enforced: true },
+    { condition: "Targets", value: "1 boss", enforced: false },
+    { condition: "Power Infusion", value: "Not applied", enforced: false },
+    { condition: "Vault sockets", value: "None granted", enforced: false },
+    { condition: "Equipped gear", value: "Upgraded to the top of its track", enforced: true },
+    { condition: "Candidates", value: "6/6 only", enforced: true },
+  ];
+}
+
+/**
+ * WoWAudit needs both sides of the comparison fully upgraded, so the toggle turns that on rather than
+ * leaving it to be forgotten. Settings are returned unchanged when it is off, including the older saved
+ * sessions that have no such setting at all.
+ */
+export function wowAuditSettings(ufSettings) {
+  if (!(ufSettings || {}).wowAudit) return ufSettings;
+  return { ...ufSettings, maxCurrentGear: true };
+}
+
+/**
+ * The fight length this report has to be scored at, or 0 to leave the character's own model alone.
+ *
+ * Its own function so the decision is testable rather than an inline condition at the one call site.
+ */
+export function reportFightLength(ufSettings) {
+  return (ufSettings || {}).wowAudit ? WOWAUDIT_FIGHT_LENGTH : 0;
+}
+
+/**
+ * Runs `run` with the cast model's fight length pinned, and puts it back afterwards.
+ *
+ * The model is the player's own, shared with the rest of the app, and fight length reaches the scoring
+ * code by two routes - `castModel.fightInfo.fightLength` for trinkets and embellishments, and
+ * `player.getFightLength()`, which reads the same object. Setting it here covers both. Restoring it in
+ * a `finally` matters: a run that throws must not leave the character scoring at five minutes
+ * everywhere else in the app.
+ *
+ * Dungeon content is the exception - `Player.getFightLength` returns a hardcoded 200s there and never
+ * consults the model, so a dungeon report cannot be pinned. WoWAudit asks for a raid report.
+ */
+export function withFightLength(castModel, seconds, run) {
+  if (!seconds || !castModel || !castModel.fightInfo) return run();
+
+  const previous = castModel.fightInfo.fightLength;
+  castModel.fightInfo.fightLength = seconds;
+  try {
+    return run();
+  } finally {
+    castModel.fightInfo.fightLength = previous;
+  }
+}
+
 export function runUpgradeFinder(player, contentType, currentLanguage, playerSettings, userSettings) {
   // TEMP VARIABLES
   const completedItemList = [];
 
+  // A WoWAudit report has conditions of its own, and one of them is a setting the player would otherwise
+  // have to remember to tick separately.
+  const ufSettings = wowAuditSettings(playerSettings);
 
   // console.log("Running Upgrade Finder. Strap in.");
-  const baseItemList = upgradeFinderBaseline(player, playerSettings);
+  const baseItemList = upgradeFinderBaseline(player, ufSettings);
   //const wepList = buildWepCombosUF(player, baseItemList);
   const wepList = buildNewWepCombosUF(player, baseItemList);
   const castModel = player.getActiveModel(contentType);
@@ -180,14 +263,21 @@ export function runUpgradeFinder(player, contentType, currentLanguage, playerSet
 
   const baseHPS = player.getHPS(contentType);
   //userSettings.dominationSockets = "Upgrade Finder";
-  const baseSet = runTopGear(baseItemList, wepList, player, contentType, baseHPS, moddedSettings, castModel);
-  const baseScore = baseSet.itemSet.hardScore;
 
-  const itemPoss = buildItemPossibilities(player, contentType, playerSettings, userSettings);
+  // Every score in the report - the baseline and each candidate - has to be taken at the same fight length,
+  // so the whole loop runs inside the pin rather than each evaluation setting it for itself.
+  const itemPoss = withFightLength(castModel, reportFightLength(ufSettings), () => {
+    const baseSet = runTopGear(baseItemList, wepList, player, contentType, baseHPS, moddedSettings, castModel);
+    const baseScore = baseSet.itemSet.hardScore;
 
-  for (var x = 0; x < itemPoss.length; x++) {
-    completedItemList.push(processItem(itemPoss[x], baseItemList, baseScore, player, contentType, baseHPS, currentLanguage, moddedSettings, castModel));
-  }
+    const candidates = buildItemPossibilities(player, contentType, ufSettings, userSettings);
+
+    for (var x = 0; x < candidates.length; x++) {
+      completedItemList.push(processItem(candidates[x], baseItemList, baseScore, player, contentType, baseHPS, currentLanguage, moddedSettings, castModel));
+    }
+
+    return candidates;
+  });
 
   const result = new UpgradeFinderResult(itemPoss, completedItemList, contentType);
   result.new = true;

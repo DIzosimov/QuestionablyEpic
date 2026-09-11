@@ -220,6 +220,10 @@ export default function UpgradeFinderFront(props) {
   // Whether to measure candidates against the player's gear as it is, or as it will be once every piece is
   // finished. Off by default: "what beats what I have on" is the question most of the time.
   const [ufMaxCurrentGear, setUfMaxCurrentGear] = useState(() => getSessionStorageOrDefault("ufMaxCurrentGear", false));
+  // Runs the report under WoWAudit's conditions and stamps it with them. Off by default: it pins the fight to
+  // five minutes, which is not the length QE scores at, so a report run this way is for submitting rather than
+  // for comparing against anything else on the site.
+  const [ufWowAudit, setUfWowAudit] = useState(() => getSessionStorageOrDefault("ufWowAudit", false));
   const [ufItemTypes, setUfItemTypes] = useState(() => {
     const stored = getSessionStorageOrDefault("ufItemTypes", itemTypeOptions);
     if (!Array.isArray(stored) || stored.length === 0) {
@@ -237,6 +241,7 @@ export default function UpgradeFinderFront(props) {
       craftedStats: ufCraftedStats,
       itemTypes: ufItemTypes,
       maxCurrentGear: ufMaxCurrentGear,
+      wowAudit: ufWowAudit,
   };
 
   useEffect(() => {
@@ -262,6 +267,10 @@ export default function UpgradeFinderFront(props) {
   useEffect(() => {
     setSessionStorage("ufMaxCurrentGear", ufMaxCurrentGear);
   }, [ufMaxCurrentGear]);
+
+  useEffect(() => {
+    setSessionStorage("ufWowAudit", ufWowAudit);
+  }, [ufWowAudit]);
 
   useEffect(() => {
     setSessionStorage("ufItemTypes", ufItemTypes);
@@ -721,9 +730,23 @@ export default function UpgradeFinderFront(props) {
             </Typography>
           }>
             <FormControlLabel
-              control={<Checkbox size="small" checked={ufMaxCurrentGear}
+              control={<Checkbox size="small" checked={ufMaxCurrentGear || ufWowAudit} disabled={ufWowAudit}
                                  onChange={(e) => setUfMaxCurrentGear(e.target.checked)} />}
               label={<Typography variant="body2">Compare everything fully upgraded (6/6)</Typography>}
+            />
+          </Tooltip>
+          <Tooltip placement="top" title={
+            <Typography variant="caption">
+              {"Runs the report under the conditions WoWAudit requires - Patchwerk, a five minute fight, one "}
+              {"boss, no Power Infusion, no vault sockets, and both sides of the comparison fully upgraded - and "}
+              {"lists them on the report so they can be checked. QE scores a raid at 6:40 by default, so the "}
+              {"numbers in a report run this way are not comparable to one run without it."}
+            </Typography>
+          }>
+            <FormControlLabel
+              control={<Checkbox size="small" checked={ufWowAudit}
+                                 onChange={(e) => setUfWowAudit(e.target.checked)} />}
+              label={<Typography variant="body2">Run under WoWAudit conditions</Typography>}
             />
           </Tooltip>
           <div>

@@ -18,6 +18,7 @@ import { Link, useHistory, useLocation } from "react-router-dom";
 import EquippedItems from "./CurrentlyEquippedPanel";
 import { trackPageView } from "Analytics";
 import InformationBox from "General/Modules/GeneralComponents/InformationBox";
+import ReportConditions from "./ReportConditions";
 
 function a11yProps(index) {
   return {
@@ -146,6 +147,9 @@ export default function UpgradeFinderReport(props) {
           {/*<Grid item xs={12}>
             <InformationBox variant={"yellow"} title={"Tier Pieces"} information={"Remember that Tier Set pieces are very valuable but will NOT show as major upgrades unless they complete a set for you. Aim to obtain these anyway."}></InformationBox>
           </Grid>*/}
+          <Grid item xs={12}>
+            <ReportConditions ufSettings={ufSettings} />
+          </Grid>
           <Grid item xs={12} style={{ padding: "4px 0px 5px 0px" }}>
            <EquippedItems items={result.equippedItems} gameType={result.gameType} contentType={result.contentType} />
           </Grid>
