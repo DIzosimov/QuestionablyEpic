@@ -1,12 +1,14 @@
 import { bonus_IDs } from "../../../Retail/Engine/BonusIDs";
+import { parseOmniumTalents } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OmniumFolioData";
 import { curveDB } from "../../../Retail/Engine/ItemCurves";
-import { compileStats, checkDefaultSocket, calcStatsAtLevel, getItemProp, getItem, getItemAllocations, scoreItem, correctCasing, getValidWeaponTypes, getValidArmorTypes, getValidWeaponTypesBySpec } from "../../Engine/ItemUtilities";
+import { compileStats, checkDefaultSocket, calcStatsAtLevel, getItemProp, getItem, getItemAllocations, scoreItem, correctCasing, getValidWeaponTypes, getValidArmorTypes, getValidWeaponTypesBySpec, parseUpgradeCurrencies } from "../../Engine/ItemUtilities";
 import Item from "../Item";
 import Player from "General/Modules/Player/Player";
 import { CONSTANTS } from "General/Engine/CONSTANTS";
 import { getTitanDiscName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/TitanDiscBeltData"
 import ItemSquishEras from "Retail/Engine/ItemSquishEras.json"
 import { bonusLootCaches } from "Databases/InstanceDB";
+import { getEmbellishmentByEffectName } from "Databases/EmbellishmentDB";
 
 /**
  * This entire page is a bit of a disaster, owing mostly to how bizarrely some things are implemented in game. 
@@ -19,6 +21,18 @@ const stat_ids: {[key: number]: string} = {
   32: "crit",
   40: "versatility",
   49: "mastery",
+};
+
+// SimC gives us the spell name for Darkmoon Sigils, which is only the suffix ("Hunt", "Void" and so on).
+// Map those back to the full embellishment name before we look them up.
+const DARKMOON_SIGIL_SPELLS: {[key: string]: string} = {
+  "Ascendance": "Darkmoon Sigil: Ascension",
+  "Symbiosis": "Darkmoon Sigil: Symbiosis",
+  "Vivacity": "Darkmoon Sigil: Vivacity",
+  "Hunt": "Darkmoon Sigil: Hunt",
+  "Void": "Darkmoon Sigil: Void",
+  "Blood": "Darkmoon Sigil: Blood",
+  "Rot": "Darkmoon Sigil: Rot",
 };
 
 function getPlayerServerName(lines: string[]) {
@@ -286,6 +300,14 @@ export function runSimC(simCInput: string, player: Player, contentType: contentT
 }
 
 export function processAllLines(player: Player, contentType: contentTypes, lines: string[], linkedItems: number, vaultItems: number, playerSettings: PlayerSettings, autoUpgradeVault: boolean, autoUpgradeAll: boolean) {
+  // The Omnium Folio is a character line rather than an item, so it's read here rather than in processItem.
+  const folioLine = lines.find((line) => line.trim().startsWith("omnium_talents="));
+  if (folioLine) player.folioRunes = parseOmniumTalents(folioLine.trim());
+
+  // Crests and Valorstones, for working out what a character can actually afford to upgrade.
+  const currencyLine = lines.find((line) => line.replace(/^#\s*/, "").startsWith("upgrade_currencies="));
+  if (currencyLine) player.upgradeCurrency = parseUpgradeCurrencies(currencyLine);
+
   for (var i = 8; i < lines.length; i++) {
     let line = lines[i];
     let type = i > vaultItems && i < linkedItems ? "Vault" : "Regular";
@@ -613,18 +635,19 @@ export function processItem(line: string, player: Player, contentType: contentTy
 
 
           // Embellishments that require a tag.
-          if (['Blessed Pango Charm', 'Arcanoweave Lining', 'Sunfire Silk Lining', 'Primal Spore Binding', 'Hunt', 'Void', 'Rot', 'Blood'].includes(specialEffectName)) {
-            if (specialEffectName === "Ascendance") specialEffectName = "Darkmoon Sigil: Ascension"
-            else if (specialEffectName === "Symbiosis") specialEffectName = "Darkmoon Sigil: Symbiosis"
-            else if (specialEffectName === 'Hunt') specialEffectName = "Darkmoon Sigil: Hunt"
-            else if (specialEffectName === "Void") specialEffectName = "Darkmoon Sigil: Void"
-            
+          // SimC reports the *spell* name, which for the Darkmoon Sigils is just the suffix. Normalise those first,
+          // then check the result against EmbellishmentDB rather than a hardcoded list - the old allowlist only
+          // covered eight names and silently dropped every other embellishment on import.
+          if (DARKMOON_SIGIL_SPELLS[specialEffectName]) specialEffectName = DARKMOON_SIGIL_SPELLS[specialEffectName];
+
+          const matchedEmbellishment = getEmbellishmentByEffectName(specialEffectName);
+          if (matchedEmbellishment) {
             protoItem.effect = {
               type: "embellishment",
-              name: specialEffectName,
+              name: matchedEmbellishment.effect.name,
               level: protoItem.level //(itemBaseLevel + itemLevelGain),
             }
-            
+
             protoItem.uniqueTag = "embellishment";
           }
 
@@ -650,10 +673,10 @@ export function processItem(line: string, player: Player, contentType: contentTy
       //craftedStats = [];
     }
     if (bonus_id === "12053") {
-      protoItem.upgradeTrack = "Gilded Crafted";
+      protoItem.upgradeTrack = "Myth Crafted";
     }
     else if (bonus_id === "12052") {
-      protoItem.upgradeTrack = "Runed Crafted";
+      protoItem.upgradeTrack = "Hero Crafted";
     }
     if (bonus_id === "8960") protoItem.uniqueTag = "embellishment";
   }
@@ -716,6 +739,7 @@ export function processItem(line: string, player: Player, contentType: contentTy
     // Add stats to our item based on its item allocations.
     item.stats = calcStatsAtLevel(item.level, protoItem.slot, itemAllocations, protoItem.tertiary);
     item.gemString = gemString !== "" ? gemString.slice(0, -1) : "";
+    if (enchantID > 0) item.enchantID = enchantID;
     if (Object.keys(itemBonusStats).length > 0) item.addStats(itemBonusStats);
 
     // Special effects. Note we handle them here instead of in the items constructor in case the player has added an effect to an item like an Embellishment.

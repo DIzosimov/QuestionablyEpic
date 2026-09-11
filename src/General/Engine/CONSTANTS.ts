@@ -29,7 +29,10 @@ export const CONSTANTS = {
     currentRaidIDs: [1320, 1317], // This should be an array even with one raid. This value is used in various array specific functions. 1317 = new world boss
     currentDungeonIDs: [1322, 1311, 1304, 1309, 1313, 1041, 1202, 1030],
     fullItemLevels: [250, 253, 256, 259, 263, 266, 269, 272, 276, 279, 282, 285, 289, 292, 295, 298, 302, 305, 308, 311, 315, 318, 321, 324, 328, 331, 334, 337, 341, 344],
-    itemLevelCaps: { Adventurer: 282, Veteran: 295, Champion: 308, Hero: 321, Myth: 334, "Runed Crafted": 318, "Gilded Crafted": 331 },
+    // The crafted tracks are named for the crest that pays for them. The Runed / Gilded names are the previous
+    // expansion's and are kept so gear saved under them still resolves its cap.
+    itemLevelCaps: { Adventurer: 282, Veteran: 295, Champion: 308, Hero: 321, Myth: 334,
+                     "Hero Crafted": 318, "Myth Crafted": 331, "Runed Crafted": 318, "Gilded Crafted": 331 },
     seasonID: 37,
     tierNames: { // @deprecated.
       "Preservation Evoker": "of the Black Talon", 

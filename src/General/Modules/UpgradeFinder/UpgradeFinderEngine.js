@@ -102,18 +102,81 @@ export function buildNewWepCombosUF(player, itemList) {
 
 
 // PlayerSettings = Upgrade Finder Settings
+/**
+ * The settings every Upgrade Finder evaluation runs under.
+ *
+ * Two departures from whatever Top Gear is set to:
+ *
+ * Gear is measured as it actually is - the player's own gems, enchants and Folio runes - rather than against a
+ * re-gemmed ideal, so the percentage answers "how much better would this item make me" rather than "how much
+ * better would this item and a full re-gem make me". The candidate item itself has none of those, so it's gemmed
+ * and enchanted automatically like any new drop would be.
+ *
+ * And the gem and enchant expansion is off. This runs a full evaluation per candidate item, hundreds of times, on
+ * the thread drawing the page - searching combinations per candidate would cost millions of evaluations for an
+ * estimate that's meant to be rough. It also keeps the comparison honest: item A only tells you something about
+ * item B if both were gemmed the same way, and a per candidate search can hand one of them a better loadout for
+ * reasons that have nothing to do with the item.
+ */
+export function upgradeFinderGearSettings(userSettings) {
+  const off = (setting) => ({ ...(userSettings[setting] || {}), value: false });
+
+  return {
+    ...userSettings,
+    forceTier: { value: "S2" },
+    replaceExistingGems: off("replaceExistingGems"),
+    detailedGearOptions: off("detailedGearOptions"),
+    optimizeAllGearOptions: off("optimizeAllGearOptions"),
+  };
+}
+
+/**
+ * The player's gear as if every piece were already at the top of its own upgrade track.
+ *
+ * Upgrade Finder measures a candidate against what the player has on, so a partly upgraded set flatters
+ * everything it compares against it: a piece that only wins because the gear beside it is three ranks short isn't
+ * an upgrade, it's a reminder to spend crests. Raising the baseline answers the other question - what is still
+ * worth chasing once the crests are spent.
+ *
+ * Copies, so the player's own gear is untouched. A piece with no track is left alone: crafted items this season
+ * carry no track at all, and there is nothing to raise them to.
+ */
+export function atTopOfTrack(items) {
+  return (items || []).map((item) => {
+    const cap = CONSTANTS.itemLevelCaps[item.upgradeTrack];
+    if (!cap || item.level >= cap) return item;
+
+    const raised = item.clone();
+    raised.updateLevel(cap, item.missiveStats);
+    // clone() drops this, since two items can't both be equipped - but these stand in for the equipped set.
+    raised.isEquipped = item.isEquipped;
+    return raised;
+  });
+}
+
+/**
+ * The gear every candidate is measured against.
+ *
+ * Raising it is the player's call: it changes the question from "what beats my gear as it is" to "what beats my
+ * gear once it's finished". Its own function so the choice itself is testable, rather than only the raising.
+ */
+export function upgradeFinderBaseline(player, ufSettings) {
+  const equipped = player.getEquippedItems(true);
+  return (ufSettings || {}).maxCurrentGear ? atTopOfTrack(equipped) : equipped;
+}
+
 export function runUpgradeFinder(player, contentType, currentLanguage, playerSettings, userSettings) {
   // TEMP VARIABLES
   const completedItemList = [];
 
 
   // console.log("Running Upgrade Finder. Strap in.");
-  const baseItemList = player.getEquippedItems(true);
+  const baseItemList = upgradeFinderBaseline(player, playerSettings);
   //const wepList = buildWepCombosUF(player, baseItemList);
   const wepList = buildNewWepCombosUF(player, baseItemList);
   const castModel = player.getActiveModel(contentType);
 
-  const moddedSettings = {...userSettings, forceTier: {value: "S2"}};
+  const moddedSettings = upgradeFinderGearSettings(userSettings);
 
   const baseHPS = player.getHPS(contentType);
   //userSettings.dominationSockets = "Upgrade Finder";

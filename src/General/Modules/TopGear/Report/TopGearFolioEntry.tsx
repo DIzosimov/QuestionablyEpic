@@ -5,15 +5,19 @@ import { getFolioIcon } from "Retail/Engine/EffectFormulas/Generic/PatchEffectIt
 
 interface TopGearFolioEntryProps {
   folioGems?: number[];
+  // What the slots would hold if the player changed nothing. SimC doesn't report the Folio, so the automatic
+  // rune for each slot is the only "before" available to compare against.
+  folioAuto?: number[];
 }
 
-export default function TopGearFolioEntry({ folioGems = [] }: TopGearFolioEntryProps) {
-  //let slots = Array.from({ length: 1 }, (_, i) => icons[i] ?? null);
-
-  const slots = folioGems.map((id) => {
-    const icon = getFolioIcon(id);
-    return { id, icon };
-  })
+export default function TopGearFolioEntry({ folioGems = [], folioAuto = [] }: TopGearFolioEntryProps) {
+  // Only the slots Top Gear wants moved are marked. Ringing every icon told the player nothing about which one to
+  // go and change.
+  const slots = folioGems.map((id, slot) => ({
+    id,
+    icon: getFolioIcon(id),
+    changed: folioAuto.length > slot && folioAuto[slot] !== id,
+  }));
 
   /*const slots = [{id: 1279599, icon: "inv_summerfest_firespirit"},
                   {id: 1279603, icon: "spell_shadow_felmending"},
@@ -95,7 +99,9 @@ export default function TopGearFolioEntry({ folioGems = [] }: TopGearFolioEntryP
                     borderRadius: 4,
                     borderWidth: "1px",
                     borderStyle: "solid",
-                    borderColor: "goldenrod",
+                    // Transparent rather than absent, so an unchanged icon keeps the same footprint and the row
+                    // doesn't shuffle when one of them changes.
+                    borderColor: slot.changed ? "#f0c674" : "transparent",
                 }}
                 />
             </WowheadTooltip>

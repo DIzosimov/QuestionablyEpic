@@ -19,6 +19,13 @@ import {
   calcStatsAtLevel,
   autoAddItems,
   getItemEffectOptions,
+  hasUnallocatedStats,
+  parseMissives,
+  craftedStatIDs,
+  missiveBonusIDs,
+  CRAFTED_STAT_CHOICES,
+  CRAFTED_STAT_CHOICES_RANDOM,
+  CRAFTED_STAT_CHOICES_ENGINEERING,
 } from "../../Engine/ItemUtilities";
 import { CONSTRAINTS } from "../../Engine/CONSTRAINTS";
 import { useSelector } from "react-redux";
@@ -49,7 +56,18 @@ const Alert = React.forwardRef(function Alert(props, ref) {
 
 
 // Create and return an item. Could maybe be merged with the SimC createItem function?
-export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary, missives = "", gameType) => {
+// The upgrade tracks a piece can be put on by hand. Named for the crest that pays for them, matching
+// CONSTANTS.itemLevelCaps. The crafted tracks aren't here: those come with the craft rather than being chosen.
+export const UPGRADE_TRACKS = [
+  { value: "", label: "None" },
+  { value: "Adventurer", label: "Adventurer" },
+  { value: "Veteran", label: "Veteran" },
+  { value: "Champion", label: "Champion" },
+  { value: "Hero", label: "Hero" },
+  { value: "Myth", label: "Myth" },
+];
+
+export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary, missives = "", gameType, upgradeTrack = "") => {
 
   //let player = props.player;
   let item = "";
@@ -61,7 +79,7 @@ export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary
   if (isCrafted || isRandomStats) {
 
     // Item is a legendary and gets special handling.
-    const missiveStats = missives.toLowerCase().replace(" (engineering)", "").replace(/ /g, "").split("/");
+    const missiveStats = parseMissives(missives);
     let itemAllocations = getItemAllocations(itemID, missiveStats);
     let craftedSocket = itemSocket || checkDefaultSocket(itemID);
     item = new Item(itemID, itemName, itemSlot, craftedSocket, itemTertiary, 0, itemLevel, "");
@@ -69,26 +87,12 @@ export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary
 
     //if (item.slot === "Neck") item.socket = 3;
 
-    let bonusString = "";
     if (isRandomStats) {
-      let craftedStats = [];
-      missiveStats.forEach(stat => {
-        if (stat === "haste") craftedStats.push(36);
-        else if (stat ==="crit") craftedStats.push(32);
-        else if (stat === "versatility") craftedStats.push(40);
-        else if (stat === "mastery") craftedStats.push(49);
-      })
-
-      item.craftedStats = craftedStats;
+      item.craftedStats = craftedStatIDs(missiveStats);
     }
     else {
-      if (missives.includes("Haste")) bonusString += ":6649";
-      if (missives.includes("Mastery")) bonusString += ":6648";
-      if (missives.includes("Crit")) bonusString += ":6647";
-      if (missives.includes("Versatility")) bonusString += ":6650";
-
       item.missiveStats = missiveStats;
-      item.bonusIDS = bonusString;
+      item.bonusIDS = missiveBonusIDs(missiveStats);
     }
     
     item.guessItemQuality();
@@ -97,6 +101,11 @@ export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary
     //item.guessItemQuality();
     item.quality = getItemProp(itemID, "quality", gameType);
   }
+
+  // Which track the piece is on, so it can be upgraded with crests. The SimC import reads this from bonus ids;
+  // an item added by hand has nothing to read it from, so it's asked for instead - without it the piece offers no
+  // upgrades and never appears in a crest plan.
+  if (upgradeTrack) item.upgradeTrack = upgradeTrack;
   //item.softScore = scoreItem(item, player, contentType, gameType, playerSettings);
 
   return item;
@@ -163,6 +172,7 @@ export default function ItemBar(props) {
   const [itemTertiary, setItemTertiary] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [missives, setMissives] = useState("Haste / Versatility");
+  const [upgradeTrack, setUpgradeTrack] = useState("");
   const [itemEffect, setItemEffect] = useState({type: "", effectName: "", label: ""});
 
   /* ------------------------ End Simc Module Functions ----------------------- */
@@ -196,7 +206,7 @@ export default function ItemBar(props) {
     //let item = "";
 
     if (true) { // Formerly Retail check. TODO.
-      const item = createItem(itemID, itemName, itemLevel, itemSocket, itemTertiary, missives, gameType);
+      const item = createItem(itemID, itemName, itemLevel, itemSocket, itemTertiary, missives, gameType, upgradeTrack);
 
       if (item) {
         if (itemEffect.type !== "") {
@@ -284,35 +294,10 @@ export default function ItemBar(props) {
     }
   };
   /* ---------------------------------------- Missive Array --------------------------------------- */
-  let craftedStatPossibilities = [
-    "Haste / Versatility",
-    "Haste / Mastery",
-    "Haste / Crit",
-    "Crit / Mastery",
-    "Crit / Versatility",
-    "Mastery / Versatility",
-    "Haste (engineering)",
-    "Crit (engineering)",
-    "Mastery (engineering)",
-    "Versatility (engineering)",
-  ];
+  let craftedStatPossibilities = [...CRAFTED_STAT_CHOICES, ...CRAFTED_STAT_CHOICES_ENGINEERING];
 
-  if (getItemProp(itemID, "randomStats", gameType)) {//itemID === 228843 || itemID === 238034) {
-    craftedStatPossibilities = [
-      "Haste / Versatility",
-      "Haste / Mastery",
-      "Haste / Crit",
-      "Crit / Versatility",
-      "Crit / Haste",
-      "Crit / Mastery",
-      "Mastery / Haste",
-      "Mastery / Crit",
-      "Mastery / Versatility",
-      "Versatility / Haste",
-      "Versatility / Crit",
-      "Versatility / Mastery",
-    ]
-
+  if (getItemProp(itemID, "randomStats", gameType)) {
+    craftedStatPossibilities = [...CRAFTED_STAT_CHOICES_RANDOM];
   }
 
   /*const getCraftedMissives = (itemID) => {
@@ -330,8 +315,11 @@ export default function ItemBar(props) {
     itemLevel: true,
     socket: gameType === "Retail" && CONSTANTS.socketSlots.includes(getItemProp(itemID, "slot", gameType)),
     tertiaries: !(isItemCrafted) && gameType === "Retail",
-    missives: isItemCrafted || getItemProp(itemID, "randomStats", gameType),
+    // Only offer the crafted stat picker when the item actually has stat budget to assign. Generic crafts always
+    // do; fixed-embellished items don't, and showing a picker there implies a choice that has no effect.
+    missives: (isItemCrafted && hasUnallocatedStats(itemID, gameType)) || getItemProp(itemID, "randomStats", gameType),
     specialEffect: itemEffectOptions.length > 0,
+    upgradeTrack: gameType === "Retail",
   }
 
   const autoAddOptions = [
@@ -472,6 +460,25 @@ export default function ItemBar(props) {
                       </MenuItem>
                     );
                   })}
+                </Select>
+              </FormControl>
+            </Grid>
+          ) : ""}
+          {
+          /* ---------------------------------------------------------------------------------------------- */
+          /*                                          Upgrade track                                          */
+          /* ---------------------------------------------------------------------------------------------- */
+          availableFields.upgradeTrack ? (
+            <Grid item>
+              <FormControl className={classes.formControl} variant="outlined" size="small" disabled={itemLevel === ""}>
+                <InputLabel id="trackSelection">{t("QuickCompare.UpgradeTrack")}</InputLabel>
+                <Select key={"trackSelection"} labelId="trackSelection" value={upgradeTrack}
+                        onChange={(e) => setUpgradeTrack(e.target.value)} label={t("QuickCompare.UpgradeTrack")}>
+                  {UPGRADE_TRACKS.map((track, i, arr) => (
+                    <MenuItem divider={i + 1 !== arr.length} key={track.value} value={track.value}>
+                      {track.label}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
             </Grid>
