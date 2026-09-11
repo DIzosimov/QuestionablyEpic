@@ -130,13 +130,48 @@ export function upgradeFinderGearSettings(userSettings) {
   };
 }
 
+/**
+ * The player's gear as if every piece were already at the top of its own upgrade track.
+ *
+ * Upgrade Finder measures a candidate against what the player has on, so a partly upgraded set flatters
+ * everything it compares against it: a piece that only wins because the gear beside it is three ranks short isn't
+ * an upgrade, it's a reminder to spend crests. Raising the baseline answers the other question - what is still
+ * worth chasing once the crests are spent.
+ *
+ * Copies, so the player's own gear is untouched. A piece with no track is left alone: crafted items this season
+ * carry no track at all, and there is nothing to raise them to.
+ */
+export function atTopOfTrack(items) {
+  return (items || []).map((item) => {
+    const cap = CONSTANTS.itemLevelCaps[item.upgradeTrack];
+    if (!cap || item.level >= cap) return item;
+
+    const raised = item.clone();
+    raised.updateLevel(cap, item.missiveStats);
+    // clone() drops this, since two items can't both be equipped - but these stand in for the equipped set.
+    raised.isEquipped = item.isEquipped;
+    return raised;
+  });
+}
+
+/**
+ * The gear every candidate is measured against.
+ *
+ * Raising it is the player's call: it changes the question from "what beats my gear as it is" to "what beats my
+ * gear once it's finished". Its own function so the choice itself is testable, rather than only the raising.
+ */
+export function upgradeFinderBaseline(player, ufSettings) {
+  const equipped = player.getEquippedItems(true);
+  return (ufSettings || {}).maxCurrentGear ? atTopOfTrack(equipped) : equipped;
+}
+
 export function runUpgradeFinder(player, contentType, currentLanguage, playerSettings, userSettings) {
   // TEMP VARIABLES
   const completedItemList = [];
 
 
   // console.log("Running Upgrade Finder. Strap in.");
-  const baseItemList = player.getEquippedItems(true);
+  const baseItemList = upgradeFinderBaseline(player, playerSettings);
   //const wepList = buildWepCombosUF(player, baseItemList);
   const wepList = buildNewWepCombosUF(player, baseItemList);
   const castModel = player.getActiveModel(contentType);

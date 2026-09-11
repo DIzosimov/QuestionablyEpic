@@ -215,6 +215,9 @@ export class Item {
     clonedItem.mainHandUniqueHash = this.mainHandUniqueHash;
     clonedItem.offHandUniqueHash = this.offHandUniqueHash;
     clonedItem.gemString = this.gemString;
+    // Both of these say what the piece is already wearing, which is what "keep my gems and enchants" reads. A
+    // clone that dropped them scored as though the piece were unenchanted - and upgrades are scored on clones.
+    clonedItem.enchantID = this.enchantID;
     clonedItem.missiveStats = this.missiveStats;
     clonedItem.specialAllocations = { ...this.specialAllocations };
     clonedItem.flags = [...this.flags]; // Create a new array to avoid modifying the original array

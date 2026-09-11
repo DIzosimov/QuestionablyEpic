@@ -113,3 +113,40 @@ describe("The Folio and crest budget survive a reload too", () => {
     expect(back.upgradeCurrency.currencies).toEqual({});
   });
 });
+
+/*
+  Cloning an item. Upgrades are scored on clones, so anything a clone drops is silently missing from the score -
+  and what a piece is already wearing is exactly what "keep my gems and enchants" reads.
+*/
+describe("A cloned item keeps what the piece is wearing", () => {
+  const built = () => {
+    const item = new Item(268230, "", "Head", 1, "Leech", 0, 330, "");
+    item.gemString = "240890";
+    item.enchantID = 7961;
+    item.upgradeTrack = "Hero";
+    item.isEquipped = true;
+    return item;
+  };
+
+  test("the gems and the enchant come across", () => {
+    const copy = built().clone();
+
+    expect(copy.gemString).toEqual("240890");
+    expect(copy.enchantID).toEqual(7961);
+  });
+
+  test("they survive being raised to a new level", () => {
+    // The case that matters: planUpgrades clones a piece and raises it to score what the rank is worth.
+    const original = built();
+    const raised = original.clone();
+    raised.updateLevel(340, original.missiveStats);
+
+    expect(raised.level).toEqual(340);
+    expect(raised.enchantID).toEqual(7961);
+    expect(raised.gemString).toEqual("240890");
+  });
+
+  test("the track comes across, so the copy knows what it can still become", () => {
+    expect(built().clone().upgradeTrack).toEqual("Hero");
+  });
+});

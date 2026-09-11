@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import makeStyles from "@mui/styles/makeStyles";
-import { Paper, Grid, Typography, Button, TextField, MenuItem } from "@mui/material";
+import { Paper, Grid, Typography, Button, TextField, MenuItem, Checkbox, FormControlLabel, Tooltip } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import HelpText from "../SetupAndMenus/HelpText";
 import UpgradeFinderSlider from "./Slider";
@@ -217,6 +217,9 @@ export default function UpgradeFinderFront(props) {
   const [ufPvPRank, setUfPvPRank] = useState(() => getSessionStorageOrDefault("ufPvPRank", 0));
   const [ufCraftedLevel, setUfCraftedLevel] = useState(() => Math.min(getSessionStorageOrDefault("ufCraftedLevel", 2), 2));
   const [ufCraftedStats, setUfCraftedStats] = useState(() => getSessionStorageOrDefault("ufCraftedStats", "Crit / Haste"));
+  // Whether to measure candidates against the player's gear as it is, or as it will be once every piece is
+  // finished. Off by default: "what beats what I have on" is the question most of the time.
+  const [ufMaxCurrentGear, setUfMaxCurrentGear] = useState(() => getSessionStorageOrDefault("ufMaxCurrentGear", false));
   const [ufItemTypes, setUfItemTypes] = useState(() => {
     const stored = getSessionStorageOrDefault("ufItemTypes", itemTypeOptions);
     if (!Array.isArray(stored) || stored.length === 0) {
@@ -232,7 +235,8 @@ export default function UpgradeFinderFront(props) {
       pvp: ufPvPRank,
       craftedLevel: ufCraftedLevel,
       craftedStats: ufCraftedStats,
-      itemTypes: ufItemTypes
+      itemTypes: ufItemTypes,
+      maxCurrentGear: ufMaxCurrentGear,
   };
 
   useEffect(() => {
@@ -254,6 +258,10 @@ export default function UpgradeFinderFront(props) {
   useEffect(() => {
     setSessionStorage("ufCraftedStats", ufCraftedStats);
   }, [ufCraftedStats]);
+
+  useEffect(() => {
+    setSessionStorage("ufMaxCurrentGear", ufMaxCurrentGear);
+  }, [ufMaxCurrentGear]);
 
   useEffect(() => {
     setSessionStorage("ufItemTypes", ufItemTypes);
@@ -704,6 +712,19 @@ export default function UpgradeFinderFront(props) {
             padding: 8,
           }}
         >
+          <Tooltip placement="top" title={
+            <Typography variant="caption">
+              {"Measures every candidate against your gear as if each piece were already at the top of its upgrade "}
+              {"track. Without it a piece can look like an upgrade only because the gear beside it is a few ranks "}
+              {"short, which is a reason to spend crests rather than to chase loot."}
+            </Typography>
+          }>
+            <FormControlLabel
+              control={<Checkbox size="small" checked={ufMaxCurrentGear}
+                                 onChange={(e) => setUfMaxCurrentGear(e.target.checked)} />}
+              label={<Typography variant="body2">Compare against fully upgraded gear</Typography>}
+            />
+          </Tooltip>
           <div>
             <Button variant="contained" color="primary" align="center" style={{ height: "68%", width: "180px" }} disabled={!getUpgradeFinderReady(player)} onClick={unleashUpgradeFinder}>
               {t("TopGear.GoMsg")}

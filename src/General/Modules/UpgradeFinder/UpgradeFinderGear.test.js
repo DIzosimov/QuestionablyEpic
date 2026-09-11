@@ -106,3 +106,111 @@ describe("What that means for the evaluation", () => {
     expect(pinned.itemsCompared).toEqual(1);
   });
 });
+
+/*
+  Comparing against gear that is already finished.
+
+  Upgrade Finder measures a candidate against what the player has on, so a partly upgraded set flatters everything
+  it is compared with: a piece that only wins because the gear beside it is three ranks short isn't an upgrade,
+  it's a reminder to spend crests. Raising the baseline answers the other question - what is still worth chasing
+  once those crests are spent.
+*/
+describe("Measuring against fully upgraded gear", () => {
+  const { atTopOfTrack } = require("./UpgradeFinderEngine");
+  const { CONSTANTS } = require("General/Engine/CONSTANTS");
+
+  const piece = (level, track) => {
+    const item = new Item(268230, "", "Head", 1, "", 0, level, "");
+    item.isEquipped = true;
+    item.upgradeTrack = track;
+    item.gemString = "240890";
+    item.enchantID = 7961;
+    return item;
+  };
+
+  test("a piece below its cap is raised to it", () => {
+    const raised = atTopOfTrack([piece(308, "Hero")]);
+    expect(raised[0].level).toEqual(CONSTANTS.itemLevelCaps.Hero);
+  });
+
+  test("each track goes to its own cap, not a shared one", () => {
+    const raised = atTopOfTrack([piece(300, "Champion"), piece(300, "Hero"), piece(300, "Myth")]);
+
+    expect(raised.map((item) => item.level))
+      .toEqual([CONSTANTS.itemLevelCaps.Champion, CONSTANTS.itemLevelCaps.Hero, CONSTANTS.itemLevelCaps.Myth]);
+  });
+
+  test("a piece already at its cap is left exactly as it was", () => {
+    const done = piece(CONSTANTS.itemLevelCaps.Hero, "Hero");
+    expect(atTopOfTrack([done])[0]).toBe(done);
+  });
+
+  test("a piece with no track is left alone rather than guessed at", () => {
+    // Crafted pieces this season carry no track, so there is nothing to raise them to.
+    const crafted = piece(331, "");
+    expect(atTopOfTrack([crafted])[0]).toBe(crafted);
+  });
+
+  test("the player's own gear is not touched", () => {
+    const original = piece(308, "Hero");
+    atTopOfTrack([original]);
+    expect(original.level).toEqual(308);
+  });
+
+  test("a raised piece keeps its gems, its enchant and its equipped flag", () => {
+    // It stands in for the equipped set, and the engine reads all three off it.
+    const raised = atTopOfTrack([piece(308, "Hero")])[0];
+
+    expect(raised.gemString).toEqual("240890");
+    expect(raised.enchantID).toEqual(7961);
+    expect(raised.isEquipped).toBe(true);
+  });
+
+  test("a raised piece actually gains stats", () => {
+    const before = piece(308, "Hero");
+    const after = atTopOfTrack([before])[0];
+
+    expect(after.stats.intellect).toBeGreaterThan(before.stats.intellect);
+  });
+
+  test("nothing to raise is not a crash", () => {
+    expect(atTopOfTrack([])).toEqual([]);
+    expect(atTopOfTrack(undefined)).toEqual([]);
+  });
+});
+
+/*
+  The setting actually reaching the baseline. Testing the raising on its own left the wiring uncovered - the
+  engine could ignore the setting entirely and every test still passed.
+*/
+describe("Choosing which baseline to measure against", () => {
+  const { upgradeFinderBaseline } = require("./UpgradeFinderEngine");
+  const { CONSTANTS } = require("General/Engine/CONSTANTS");
+
+  const geared = () => {
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    [["Head", 308], ["Chest", 311]].forEach(([slot, level]) => {
+      const item = new Item(268230, "", slot, 0, "", 0, level, "");
+      item.active = true;
+      item.isEquipped = true;
+      item.upgradeTrack = "Hero";
+      player.addActiveItem(item);
+    });
+    return player;
+  };
+
+  test("off, the gear is measured exactly as it is", () => {
+    expect(upgradeFinderBaseline(geared(), { maxCurrentGear: false }).map((i) => i.level)).toEqual([308, 311]);
+  });
+
+  test("on, every piece is measured at the top of its track", () => {
+    const cap = CONSTANTS.itemLevelCaps.Hero;
+    expect(upgradeFinderBaseline(geared(), { maxCurrentGear: true }).map((i) => i.level)).toEqual([cap, cap]);
+  });
+
+  test("no settings at all behaves as off", () => {
+    // An older saved session has no such setting, and must not silently change what the numbers mean.
+    expect(upgradeFinderBaseline(geared(), undefined).map((i) => i.level)).toEqual([308, 311]);
+    expect(upgradeFinderBaseline(geared(), {}).map((i) => i.level)).toEqual([308, 311]);
+  });
+});
