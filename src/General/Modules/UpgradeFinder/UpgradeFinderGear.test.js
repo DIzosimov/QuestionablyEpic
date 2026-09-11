@@ -381,3 +381,75 @@ describe("Running a report under WoWAudit conditions", () => {
     });
   });
 });
+
+/*
+  What the finished report declares as equipped.
+
+  The report is uploaded and read by other tools - WoWAudit checks this list to confirm the report was run with
+  every piece upgraded, and rejects it if the levels say otherwise. Raising the comparison raises copies, by
+  design, so the player's own items are untouched; left there, the report scores at 6/6 and then declares gear at
+  1/6, which is a contradiction whether or not anything catches it.
+*/
+describe("The equipped gear the report declares", () => {
+  const { reportedEquippedItems, upgradeFinderBaseline } = require("./UpgradeFinderEngine");
+  const { CONSTANTS: C } = require("General/Engine/CONSTANTS");
+
+  const worn = () => {
+    const player = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    [["Head", 308, "Hero"], ["Neck", 311, "Myth"]].forEach(([slot, level, track]) => {
+      const item = new Item(268230, "", slot, 0, "", 0, level, "");
+      item.active = true;
+      item.isEquipped = true;
+      item.upgradeTrack = track;
+      player.addActiveItem(item);
+    });
+    // Not worn, so it has no business being in the report either way.
+    const spare = new Item(268231, "", "Shoulder", 0, "", 0, 300, "");
+    spare.upgradeTrack = "Hero";
+    player.addActiveItem(spare);
+    return player;
+  };
+
+  test("an ordinary report declares the gear exactly as it is", () => {
+    expect(reportedEquippedItems(worn(), { maxCurrentGear: false }).map((i) => i.level)).toEqual([308, 311]);
+    expect(reportedEquippedItems(worn(), undefined).map((i) => i.level)).toEqual([308, 311]);
+  });
+
+  test("a 6/6 report declares the gear at 6/6, the way it was scored", () => {
+    expect(reportedEquippedItems(worn(), { maxCurrentGear: true }).map((i) => i.level))
+      .toEqual([C.itemLevelCaps.Hero, C.itemLevelCaps.Myth]);
+  });
+
+  test("a WoWAudit report does too, without the other box being ticked", () => {
+    // The toggle forces the 6/6 comparison on, so the declaration has to follow it rather than the raw setting.
+    expect(reportedEquippedItems(worn(), { wowAudit: true, maxCurrentGear: false }).map((i) => i.level))
+      .toEqual([C.itemLevelCaps.Hero, C.itemLevelCaps.Myth]);
+  });
+
+  test("it declares what was scored, piece for piece", () => {
+    // The two lists are built by different code from different sources; if they ever disagree the report is
+    // making a claim the run didn't back up.
+    const player = worn();
+    const settings = { maxCurrentGear: true };
+
+    expect(reportedEquippedItems(player, settings).map((i) => i.level))
+      .toEqual(upgradeFinderBaseline(player, settings).map((i) => i.level));
+  });
+
+  test("gear the player isn't wearing stays out of it", () => {
+    expect(reportedEquippedItems(worn(), { maxCurrentGear: true }).length).toBe(2);
+  });
+
+  test("the player's own items are never touched", () => {
+    // They're shown elsewhere in the app and saved to the character. A report must not rewrite them.
+    const player = worn();
+    reportedEquippedItems(player, { maxCurrentGear: true });
+
+    expect(player.activeItems.filter((i) => i.isEquipped).map((i) => i.level)).toEqual([308, 311]);
+  });
+
+  test("a character with no items is not a crash", () => {
+    const empty = new Player("T", "Preservation Evoker", 1, "EU", "R", "Dracthyr", "default", "Retail");
+    expect(reportedEquippedItems(empty, { maxCurrentGear: true })).toEqual([]);
+  });
+});

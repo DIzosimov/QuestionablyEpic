@@ -6,7 +6,7 @@ import HelpText from "../SetupAndMenus/HelpText";
 import UpgradeFinderSlider from "./Slider";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
-import { runUpgradeFinder } from "./UpgradeFinderEngine";
+import { runUpgradeFinder, reportedEquippedItems } from "./UpgradeFinderEngine";
 import { runUpgradeFinderBC } from "./UpgradeFinderEngineClassic";
 import { useHistory } from "react-router-dom";
 import { useSelector } from "react-redux";
@@ -150,8 +150,8 @@ function shortenReport(player, contentType, result, ufSettings, settings) {
 
   const socketSetting = settings.topGearAutoGem.value || false;
 
-  // Equipped items
-  const equippedItems = player.activeItems.filter((item) => item.isEquipped);
+  // Equipped items, as the run scored them - raised to 6/6 when the comparison was.
+  const equippedItems = reportedEquippedItems(player, ufSettings);
 
   const report = { id: generateReportCode(), dateCreated: date, timeCreated: timestamp, playername: player.charName, realm: player.realm, region: player.region,
                     autoGem: socketSetting, spec: player.spec, contentType: contentType, results: result.differentials, ufSettings: ufSettings,

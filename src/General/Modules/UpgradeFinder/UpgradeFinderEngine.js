@@ -245,6 +245,20 @@ export function withFightLength(castModel, seconds, run) {
   }
 }
 
+/**
+ * The equipped gear the finished report declares.
+ *
+ * It has to be the gear the run was actually scored against, not the gear sitting on the character. With the
+ * comparison raised to 6/6 those are different things - `atTopOfTrack` works on copies, deliberately, so the
+ * player's own items are left alone - and a report that scores at 6/6 while declaring gear at 1/6 contradicts
+ * itself. WoWAudit reads this list to check the report was run with everything upgraded, and rejects it on
+ * exactly that mismatch.
+ */
+export function reportedEquippedItems(player, ufSettings) {
+  const equipped = (player.activeItems || []).filter((item) => item.isEquipped);
+  return (wowAuditSettings(ufSettings) || {}).maxCurrentGear ? atTopOfTrack(equipped) : equipped;
+}
+
 export function runUpgradeFinder(player, contentType, currentLanguage, playerSettings, userSettings) {
   // TEMP VARIABLES
   const completedItemList = [];
