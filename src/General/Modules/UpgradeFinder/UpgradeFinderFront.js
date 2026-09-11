@@ -714,15 +714,16 @@ export default function UpgradeFinderFront(props) {
         >
           <Tooltip placement="top" title={
             <Typography variant="caption">
-              {"Measures every candidate against your gear as if each piece were already at the top of its upgrade "}
-              {"track. Without it a piece can look like an upgrade only because the gear beside it is a few ranks "}
-              {"short, which is a reason to spend crests rather than to chase loot."}
+              {"Puts both sides of the comparison at the top of their track: your equipped gear is raised to 6/6, "}
+              {"and candidates are offered only at 6/6 rather than at the level they drop at. Without it the "}
+              {"numbers measure the crests you haven't spent as much as the piece itself - a 1/6 drop against "}
+              {"finished gear, or finished gear against a 1/6 drop - which is the skew WoWAudit rejects."}
             </Typography>
           }>
             <FormControlLabel
               control={<Checkbox size="small" checked={ufMaxCurrentGear}
                                  onChange={(e) => setUfMaxCurrentGear(e.target.checked)} />}
-              label={<Typography variant="body2">Compare against fully upgraded gear</Typography>}
+              label={<Typography variant="body2">Compare everything fully upgraded (6/6)</Typography>}
             />
           </Tooltip>
           <div>

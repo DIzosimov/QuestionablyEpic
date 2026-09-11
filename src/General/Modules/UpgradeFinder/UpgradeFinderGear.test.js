@@ -214,3 +214,46 @@ describe("Choosing which baseline to measure against", () => {
     expect(upgradeFinderBaseline(geared(), {}).map((i) => i.level)).toEqual([308, 311]);
   });
 });
+
+/*
+  Which version of a candidate to offer.
+
+  Raising the player's gear is only half the comparison. A candidate still offered at the level it drops at - one
+  rank of six - measures the crests they haven't spent as much as the piece, and that is the skew that makes these
+  numbers unusable elsewhere.
+*/
+describe("Offering candidates at the level they end up, not the level they drop", () => {
+  const { candidateStates } = require("./UpgradeFinderEngine");
+  const RAID = ["drop", "max", "bonus"];
+
+  test("off, every version is offered as before", () => {
+    expect(candidateStates(RAID, { maxCurrentGear: false })).toEqual(RAID);
+    expect(candidateStates(RAID, {})).toEqual(RAID);
+    expect(candidateStates(RAID, undefined)).toEqual(RAID);
+  });
+
+  test("on, the version that drops at one rank of six is dropped", () => {
+    expect(candidateStates(RAID, { maxCurrentGear: true })).toEqual(["max", "bonus"]);
+  });
+
+  test("the finished versions are kept, both of them", () => {
+    // "max" is the top of the track the piece drops on, "bonus" the top of the vault track above it - a 6/6 Hero
+    // piece and a 6/6 Myth one, which is the comparison worth making.
+    const offered = candidateStates(RAID, { maxCurrentGear: true });
+
+    expect(offered).toContain("max");
+    expect(offered).toContain("bonus");
+  });
+
+  test("a dungeon whose end and vault share a track still offers its finished version", () => {
+    // That case only ever had two versions to begin with, so removing the drop must not leave it with none.
+    const offered = candidateStates(["drop", "bonus"], { maxCurrentGear: true });
+
+    expect(offered).toEqual(["bonus"]);
+    expect(offered.length).toBeGreaterThan(0);
+  });
+
+  test("nothing on offer is not a crash", () => {
+    expect(candidateStates([], { maxCurrentGear: true })).toEqual([]);
+  });
+});

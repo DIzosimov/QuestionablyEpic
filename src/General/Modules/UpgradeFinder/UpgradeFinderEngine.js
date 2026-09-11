@@ -303,6 +303,22 @@ function convertRaidDifficultyToString(raidID) {
   return raidDifficulty[raidID];
 }
 
+/**
+ * Which versions of a candidate to offer.
+ *
+ * "drop" is the piece as it lands, before a crest is spent - one rank of six. Measuring that against gear the
+ * player has finished upgrading reports the crests they haven't spent as much as the piece itself, and measuring
+ * finished gear against it is the same skew the other way round. With the comparison set to fully upgraded, only
+ * the finished versions are offered: "max" is the top of the track the piece drops on, "bonus" the top of the
+ * vault track above it - a 6/6 Hero piece and a 6/6 Myth one, which is the comparison worth making.
+ *
+ * Its own function so the wiring is testable, not just the filtering.
+ */
+export function candidateStates(available, ufSettings) {
+  if (!(ufSettings || {}).maxCurrentGear) return available;
+  return available.filter((state) => state !== "drop");
+}
+
 function buildItemPossibilities(player, contentType, playerSettings, settings) {
   let itemPoss = [];
 
@@ -319,7 +335,7 @@ function buildItemPossibilities(player, contentType, playerSettings, settings) {
 
       if (isRaid && encounter > 0) {
         // For raid items - We need to create three versions. Regular, max version (crests spent) and bonus roll (that also spends crests).
-        const raidStates = ["drop", "max", "bonus"];
+        const raidStates = candidateStates(["drop", "max", "bonus"], playerSettings);
         raidStates.forEach(raidState => {
           const itemLevel = getSetItemLevel(itemSources, playerSettings, raidState, rawItem.slot);
           const item = buildItem(player, contentType, rawItem, itemLevel, rawItem.sources[0], settings, playerSettings);
@@ -337,9 +353,9 @@ function buildItemPossibilities(player, contentType, playerSettings, settings) {
         // Edit which dungeons are in-season in the CONSTANTS file.
         if (CONSTANTS.currentDungeonIDs.includes(encounter)) {
           const keyReward = getMPlusKeyReward(playerSettings.dungeon);
-          const dungeonStates = mplusEndAndVaultSameTrack(playerSettings.dungeon)
+          const dungeonStates = candidateStates(mplusEndAndVaultSameTrack(playerSettings.dungeon)
             ? ["drop", "bonus"]
-            : ["drop", "max", "bonus"];
+            : ["drop", "max", "bonus"], playerSettings);
 
           dungeonStates.forEach((dungeonState) => {
             const itemLevel = getSetItemLevel(itemSources, playerSettings, dungeonState, rawItem.slot);
