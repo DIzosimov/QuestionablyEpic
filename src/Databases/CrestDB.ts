@@ -92,6 +92,16 @@ export const crestCurrency = (crest: string): number => {
   return found ? Number(found[0]) : 0;
 };
 
-/** The ranks still available to an item, from where it is now to the top of its track. */
+/** Whether a track is a single payment to a ceiling rather than a ladder of ranks. */
+export const isCraftedTrack = (track: string): boolean => track in CRAFTED_TRACKS;
+
+/**
+ * The ranks still available to an item, from where it is now to the top of its track.
+ *
+ * A ladder is walked a rank at a time, so the ranks left are the ones starting at or above where the piece sits.
+ * A crafted track is one payment to its ceiling, so the only question is whether the piece is already there -
+ * matching on the base level instead would quietly offer nothing at all for a crafted piece sitting anywhere but
+ * exactly its base, and a piece that silently offers no upgrades never appears in a crest plan.
+ */
 export const remainingUpgrades = (track: string, level: number): UpgradeCost[] =>
-  (UPGRADE_COSTS[track] || []).filter((rank) => rank.fromLevel >= level);
+  (UPGRADE_COSTS[track] || []).filter((rank) => (isCraftedTrack(track) ? level < rank.toLevel : rank.fromLevel >= level));

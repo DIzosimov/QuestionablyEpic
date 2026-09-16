@@ -65,7 +65,9 @@ export function upgradeStepsFor(item: any): UpgradeStep[] {
   return remainingUpgrades(item.upgradeTrack, item.level).map((rank: UpgradeCost) => ({
     item,
     track: item.upgradeTrack,
-    fromLevel: rank.fromLevel,
+    // Where the piece actually starts from. For a ladder that is the rank's own start; for a crafted piece made
+    // above its base level it is the piece, so the plan doesn't report a climb from a level it was never at.
+    fromLevel: Math.max(rank.fromLevel, item.level || 0),
     toLevel: rank.toLevel,
     crest: rank.crest,
     crests: rank.crests,

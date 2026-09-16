@@ -67,6 +67,24 @@ export const UPGRADE_TRACKS = [
   { value: "Myth", label: "Myth" },
 ];
 
+// Crafted gear doesn't climb the ladder above. It's made at its base level for no crests at all, and a single
+// payment lifts it to its track's ceiling - 80 Hero crests to 318, or 80 Myth crests to 331. Offering it the
+// ladder tracks would price it as six cheap ranks it cannot buy, so it gets its own two instead.
+export const CRAFTED_UPGRADE_TRACKS = [
+  { value: "", label: "None" },
+  { value: "Hero Crafted", label: "Hero Crafted (318)" },
+  { value: "Myth Crafted", label: "Myth Crafted (331)" },
+];
+
+/**
+ * The tracks an item can be put on.
+ *
+ * Which list applies is read from the item database rather than guessed from the item's level or name - a crafted
+ * piece and a dropped one can sit at the same item level, and only the database knows which is which.
+ */
+export const upgradeTracksFor = (itemID, gameType) =>
+  getItemProp(itemID, "crafted", gameType) ? CRAFTED_UPGRADE_TRACKS : UPGRADE_TRACKS;
+
 export const createItem = (itemID, itemName, itemLevel, itemSocket, itemTertiary, missives = "", gameType, upgradeTrack = "") => {
 
   //let player = props.player;
@@ -173,6 +191,11 @@ export default function ItemBar(props) {
   const [inputValue, setInputValue] = useState("");
   const [missives, setMissives] = useState("Haste / Versatility");
   const [upgradeTrack, setUpgradeTrack] = useState("");
+  // Crafted and dropped gear are offered different tracks, so a track picked for one item may not exist for the
+  // next one selected. Fall back to none rather than carry it over - an item silently saved onto a track it can't
+  // be on would be priced wrongly in a crest plan.
+  const trackOptions = upgradeTracksFor(itemID, gameType);
+  const selectedTrack = trackOptions.some((track) => track.value === upgradeTrack) ? upgradeTrack : "";
   const [itemEffect, setItemEffect] = useState({type: "", effectName: "", label: ""});
 
   /* ------------------------ End Simc Module Functions ----------------------- */
@@ -206,7 +229,7 @@ export default function ItemBar(props) {
     //let item = "";
 
     if (true) { // Formerly Retail check. TODO.
-      const item = createItem(itemID, itemName, itemLevel, itemSocket, itemTertiary, missives, gameType, upgradeTrack);
+      const item = createItem(itemID, itemName, itemLevel, itemSocket, itemTertiary, missives, gameType, selectedTrack);
 
       if (item) {
         if (itemEffect.type !== "") {
@@ -307,6 +330,7 @@ export default function ItemBar(props) {
   }*/
 
   const isItemCrafted = (getItemProp(itemID, "crafted", gameType)); // Change this to crafted.
+
 
   const itemEffectOptions = getItemEffectOptions(itemID, gameType);
 
@@ -472,9 +496,9 @@ export default function ItemBar(props) {
             <Grid item>
               <FormControl className={classes.formControl} variant="outlined" size="small" disabled={itemLevel === ""}>
                 <InputLabel id="trackSelection">{t("QuickCompare.UpgradeTrack")}</InputLabel>
-                <Select key={"trackSelection"} labelId="trackSelection" value={upgradeTrack}
+                <Select key={"trackSelection"} labelId="trackSelection" value={selectedTrack}
                         onChange={(e) => setUpgradeTrack(e.target.value)} label={t("QuickCompare.UpgradeTrack")}>
-                  {UPGRADE_TRACKS.map((track, i, arr) => (
+                  {trackOptions.map((track, i, arr) => (
                     <MenuItem divider={i + 1 !== arr.length} key={track.value} value={track.value}>
                       {track.label}
                     </MenuItem>
