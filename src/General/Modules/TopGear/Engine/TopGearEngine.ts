@@ -1556,7 +1556,11 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   // settings object), so treat anything that isn't a usable string as Automatic rather than crashing the whole run.
   // A variant's flask wins, then a single pinned flask, then the settings panel's own dropdown.
   const flaskChoice = getChosenConsumable(userSettings, "flask", consumableOverride) || getSetting(userSettings, "flaskChoice");
-  if (typeof flaskChoice !== "string" || !flaskChoice || flaskChoice === "Automatic") {
+  if (flaskChoice === "None") {
+    // No flask at all. Not offered in the settings panel - it's how Upgrade Finder measures gear on its own,
+    // without a flask's 165 of the best secondary propping up whichever stat the gear is short of.
+  }
+  else if (typeof flaskChoice !== "string" || !flaskChoice || flaskChoice === "Automatic") {
     if ((setStats[bestSecondary] + bonus_stats[bestSecondary]) > 28000) {
       // We are in second DR already, try and swap. Currently unused.
     }

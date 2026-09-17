@@ -127,6 +127,9 @@ export function upgradeFinderGearSettings(userSettings) {
     replaceExistingGems: off("replaceExistingGems"),
     detailedGearOptions: off("detailedGearOptions"),
     optimizeAllGearOptions: off("optimizeAllGearOptions"),
+    // Run without a flask, whatever Top Gear is set to. The consumable search is already off above (it lives
+    // behind the detailed options), so this single choice is the only flask left to switch off.
+    flaskChoice: { ...(userSettings.flaskChoice || {}), value: "None" },
   };
 }
 

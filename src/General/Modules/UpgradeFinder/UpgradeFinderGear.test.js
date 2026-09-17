@@ -98,6 +98,31 @@ describe("What that means for the evaluation", () => {
     expect(topGear.slice(1).every((gem) => gem === 240890)).toBe(false);
   });
 
+  test("no flask is worn", () => {
+    expect(evaluate(upgradeFinderGearSettings(base())).itemSet.enchantBreakdown.flask).toBeUndefined();
+  });
+
+  test("not even one Top Gear has been told to use", () => {
+    // Both routes to a flask: the settings panel's single choice, and one pinned in the detailed options.
+    const chosen = { ...base(), flaskChoice: { value: "Haste" } };
+    const pinned = { ...base(), detailedGearOptions: { value: true }, flaskChoices: { value: ["Mastery"] } };
+
+    expect(evaluate(upgradeFinderGearSettings(chosen)).itemSet.enchantBreakdown.flask).toBeUndefined();
+    expect(evaluate(upgradeFinderGearSettings(pinned)).itemSet.enchantBreakdown.flask).toBeUndefined();
+  });
+
+  test("Top Gear's own settings still wear one", () => {
+    // Switching the flask off is Upgrade Finder's choice, not a change to how Top Gear scores.
+    expect(evaluate(base()).itemSet.enchantBreakdown.flask).toBeDefined();
+  });
+
+  test("going without it costs the set healing, so it really is off rather than just unnamed", () => {
+    const withFlask = { ...upgradeFinderGearSettings(base()), flaskChoice: { value: "Automatic" } };
+
+    expect(evaluate(upgradeFinderGearSettings(base())).itemSet.hardScore)
+      .toBeLessThan(evaluate(withFlask).itemSet.hardScore);
+  });
+
   test("one evaluation per candidate, even with Optimize Everything on", () => {
     const searching = { ...base(), optimizeAllGearOptions: { value: true } };
     const pinned = evaluate(upgradeFinderGearSettings(searching));
