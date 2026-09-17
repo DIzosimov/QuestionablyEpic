@@ -111,6 +111,15 @@ describe("What that means for the evaluation", () => {
     expect(evaluate(upgradeFinderGearSettings(pinned)).itemSet.enchantBreakdown.flask).toBeUndefined();
   });
 
+  test("and the stat breakdown doesn't list a flask stat that isn't there", () => {
+    // Read as a flask choice, "None" would be lowercased into a stat called "none" and given the flask's 165 - it
+    // counts towards nothing, but the breakdown is shown on the report.
+    const consumables = evaluate(upgradeFinderGearSettings(base())).itemSet.statBreakdown.consumables;
+
+    expect(consumables).not.toHaveProperty("none");
+    expect(Object.values(consumables)).not.toContain(165);
+  });
+
   test("Top Gear's own settings still wear one", () => {
     // Switching the flask off is Upgrade Finder's choice, not a change to how Top Gear scores.
     expect(evaluate(base()).itemSet.enchantBreakdown.flask).toBeDefined();
