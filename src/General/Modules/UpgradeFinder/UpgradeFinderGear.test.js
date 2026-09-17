@@ -120,6 +120,12 @@ describe("What that means for the evaluation", () => {
     expect(Object.values(consumables)).not.toContain(165);
   });
 
+  test("None can be picked in the settings panel, and Top Gear then wears no flask either", () => {
+    expect(base().flaskChoice.options).toContain("None");
+    expect(evaluate({ ...base(), flaskChoice: { ...base().flaskChoice, value: "None" } }).itemSet.enchantBreakdown.flask)
+      .toBeUndefined();
+  });
+
   test("Top Gear's own settings still wear one", () => {
     // Switching the flask off is Upgrade Finder's choice, not a change to how Top Gear scores.
     expect(evaluate(base()).itemSet.enchantBreakdown.flask).toBeDefined();

@@ -1557,8 +1557,8 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   // A variant's flask wins, then a single pinned flask, then the settings panel's own dropdown.
   const flaskChoice = getChosenConsumable(userSettings, "flask", consumableOverride) || getSetting(userSettings, "flaskChoice");
   if (flaskChoice === "None") {
-    // No flask at all. Not offered in the settings panel - it's how Upgrade Finder measures gear on its own,
-    // without a flask's 165 of the best secondary propping up whichever stat the gear is short of.
+    // No flask at all. Upgrade Finder always runs this way, so gear is measured on its own without a flask's 165
+    // of the best secondary propping up whichever stat the gear is short of; Top Gear does when it's picked.
   }
   else if (typeof flaskChoice !== "string" || !flaskChoice || flaskChoice === "Automatic") {
     if ((setStats[bestSecondary] + bonus_stats[bestSecondary]) > 28000) {

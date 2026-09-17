@@ -52,7 +52,7 @@ const initialState : RootState = {
     
     //gemSettings: {value: "Simple", options: ["Simple", /*"Precise (Beta)"*/], category: "topGear", type: "selector", gameType: "Retail"}, // TODO: Add a "Keep current".
     //runeChoice: {value: "Automatic", options: ["Automatic", "Haste", "Crit", "Mastery"], category: "topGear", type: "selector", gameType: "Retail"},
-    flaskChoice: {value: "Automatic", options: ["Automatic", "Crit", "Mastery", "Versatility", "Haste"], category: "topGear", type: "selector", gameType: "Retail"},
+    flaskChoice: {value: "Automatic", options: ["Automatic", "Crit", "Mastery", "Versatility", "Haste", "None"], category: "topGear", type: "selector", gameType: "Retail"},
 
     // Gems, enchants and Folio runes. 0 / "Automatic" means "let the engine pick", which is what it did before
     // any of this was selectable, so an untouched profile produces identical results.
