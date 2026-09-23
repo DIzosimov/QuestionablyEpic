@@ -748,6 +748,13 @@ export default function TopGear(props: any) {
       const shardCount = workersWorthSpending(estimated, maxWorkers, EVALUATIONS_PER_SECOND, WORKER_STARTUP_SECONDS);
       shardProgress.current = [];
 
+      // Diagnostics for a run that feels slow. How long a run takes is decided here - by the evaluation count and
+      // the number of workers it buys - and none of it is visible from the progress bar or reproducible outside a
+      // browser, where the cores and the worker startup are real.
+      const runStarted = performance.now();
+      console.log("[Top Gear] evaluations=" + estimated + " workers=" + shardCount + "/" + maxWorkers +
+                  " cores=" + (navigator.hardwareConcurrency || "unknown"));
+
       Promise.all(Array.from({ length: shardCount }, (_unused, index) =>
         runWorker("Retail", {
           itemList,
@@ -763,6 +770,9 @@ export default function TopGear(props: any) {
         // travels as the chunk the workers load.
         .then(async (shards: any[]) => {
           const { finishTopGear } = await import("./Engine/TopGearEngine");
+          const workersDone = performance.now();
+          console.log("[Top Gear] workers finished in " + Math.round(workersDone - runStarted) + "ms" +
+                      " (" + Math.round(estimated / Math.max(1, (workersDone - runStarted) / 1000)) + " evaluations/sec)");
           return finishTopGear(shards, props.player, contentType, props.player.getActiveModel(contentType));
         })
         .then(async (result: TopGearResult | null) => { // 
@@ -772,7 +782,10 @@ export default function TopGear(props: any) {
             //props.setTopResult(result);
             const shortResult = shortenReport(result, props.player, itemList);
             if (shortResult) shortResult.new = true; // Check that shortReport didn't return null.
+            const beforePlan = performance.now();
             if (shortResult) shortResult.crestPlan = await planCrests(result, contentType, baseHPS);
+            console.log("[Top Gear] crest planning " + Math.round(performance.now() - beforePlan) + "ms," +
+                        " whole run " + Math.round(performance.now() - runStarted) + "ms");
             props.setTopResult(shortResult);
 
             history.push("/report/");
