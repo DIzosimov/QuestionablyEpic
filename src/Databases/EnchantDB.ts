@@ -48,9 +48,11 @@ export const enchantDB: EnchantEntry[] = [
   { id: "Empowered Hex of Leeching", name: "Empowered Hex of Leeching", enchantID: 7961, slots: ["Head"], stats: { leech: 55 } },
 
   /* ------------------------------------------- Chest ------------------------------------------- */
+  // Magister is the automatic pick for every healer: 10 intellect less than Worldsoul, for 5% of the mana pool.
+  // It leads the slot because getDefaultEnchant falls back to the first entry carrying neither a spec default nor
+  // a restriction, so order is what makes it the default rather than a list of specs to keep in step.
+  { id: "Mark of the Magister", name: "Mark of the Magister", enchantID: 8013, slots: ["Chest"], stats: { intellect: 40 }, manaPerc: 1.05 },
   { id: "Mark of the Worldsoul", name: "Mark of the Worldsoul", enchantID: 7987, slots: ["Chest"], stats: { intellect: 50 } },
-  { id: "Mark of the Magister", name: "Mark of the Magister", enchantID: 8013, slots: ["Chest"], stats: { intellect: 40 }, manaPerc: 1.05,
-    isDefaultFor: ["Restoration Shaman"] },
 
   /* ----------------------------------------- Shoulder ------------------------------------------ */
   { id: "Silvermoon's Mending", name: "Silvermoon's Mending", enchantID: 8031, slots: ["Shoulder"], stats: { leech: 166 } },

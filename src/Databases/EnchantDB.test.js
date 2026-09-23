@@ -37,13 +37,16 @@ describe("Enchant values match what the engine applied before extraction", () =>
 });
 
 describe("Per-spec defaults match the old hardcoded branches", () => {
-  test("Restoration Shaman still gets Mark of the Magister on chest", () => {
-    expect(getDefaultEnchant("Chest", "Restoration Shaman").id).toEqual("Mark of the Magister");
+  test("every healer gets Mark of the Magister on chest", () => {
+    // Worldsoul's extra 10 intellect doesn't pay for the 5% mana pool Magister grants, for any of them.
+    ["Restoration Shaman", "Preservation Evoker", "Holy Priest", "Discipline Priest", "Restoration Druid",
+     "Holy Paladin", "Mistweaver Monk"]
+      .forEach((spec) => expect(getDefaultEnchant("Chest", spec).id).toEqual("Mark of the Magister"));
   });
 
-  test("every other spec still gets Mark of the Worldsoul", () => {
-    ["Preservation Evoker", "Holy Priest", "Discipline Priest", "Restoration Druid", "Holy Paladin", "Mistweaver Monk"]
-      .forEach((spec) => expect(getDefaultEnchant("Chest", spec).id).toEqual("Mark of the Worldsoul"));
+  test("Worldsoul is still offered, just not the default", () => {
+    // It's the higher raw intellect, so it stays a choice rather than being dropped from the slot.
+    expect(getEnchantsForSlot("Chest", "Holy Priest").map((e) => e.id)).toContain("Mark of the Worldsoul");
   });
 
   test("weapon defaults match the old spec branches", () => {
