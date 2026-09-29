@@ -98,6 +98,16 @@ describe("The step a crest plan is offered for a crafted piece", () => {
     expect(step.crests).toBe(80);
   });
 
+  test("a piece crafted below the base level starts from where it is", () => {
+    // Crafting quality moves the level a piece is made at, so a crafted piece is not necessarily at 305. Reporting
+    // the base level regardless would describe a climb the piece never makes.
+    const [step] = upgradeStepsFor(crafted(290));
+
+    expect(step.fromLevel).toBe(290);
+    expect(step.toLevel).toBe(331);
+    expect(step.crests).toBe(80);
+  });
+
   test("a finished crafted piece offers nothing", () => {
     expect(upgradeStepsFor(crafted(331))).toEqual([]);
   });

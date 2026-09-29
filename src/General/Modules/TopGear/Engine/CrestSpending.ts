@@ -1,4 +1,4 @@
-import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData, CREST_CURRENCIES } from "Databases/CrestDB";
+import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData, isCraftedTrack, CREST_CURRENCIES } from "Databases/CrestDB";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                        Crest spending                                          */
@@ -65,9 +65,10 @@ export function upgradeStepsFor(item: any): UpgradeStep[] {
   return remainingUpgrades(item.upgradeTrack, item.level).map((rank: UpgradeCost) => ({
     item,
     track: item.upgradeTrack,
-    // Where the piece actually starts from. For a ladder that is the rank's own start; for a crafted piece made
-    // above its base level it is the piece, so the plan doesn't report a climb from a level it was never at.
-    fromLevel: Math.max(rank.fromLevel, item.level || 0),
+    // Where the piece actually starts from. A ladder is walked a rank at a time, so the rank's own start is right.
+    // A crafted piece is one payment from wherever it is, and crafting quality puts it above or below the base
+    // level - so it starts from the piece, and the plan doesn't report a climb from a level it was never at.
+    fromLevel: isCraftedTrack(item.upgradeTrack) ? (item.level || rank.fromLevel) : rank.fromLevel,
     toLevel: rank.toLevel,
     crest: rank.crest,
     crests: rank.crests,
