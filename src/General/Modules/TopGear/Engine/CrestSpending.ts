@@ -1,4 +1,4 @@
-import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData, isCraftedTrack, CREST_CURRENCIES } from "Databases/CrestDB";
+import { UpgradeCost, crestCurrency, remainingUpgrades, hasCrestData, isCraftedTrack, craftingCost, CREST_CURRENCIES } from "Databases/CrestDB";
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                        Crest spending                                          */
@@ -58,11 +58,25 @@ export function crestBudget(held: CrestBudget = {}, userSettings: any = {}): Cre
   return budget;
 }
 
-/** Every rank an item could still be pushed through, cheapest first. */
+/**
+ * Every rank an item could still be pushed through, cheapest first.
+ *
+ * A crafted piece the player doesn't own yet and which is already at its ceiling is the one case with no rank left
+ * to climb and a price all the same: someone has to pay the 80 crests that put it there. It gets a step of its own,
+ * costing that and moving nothing, so the plan spends the crests it really would and two crafted pieces compete for
+ * one budget instead of both looking free.
+ */
 export function upgradeStepsFor(item: any): UpgradeStep[] {
   if (!item || !item.upgradeTrack) return [];
 
-  return remainingUpgrades(item.upgradeTrack, item.level).map((rank: UpgradeCost) => ({
+  const remaining = remainingUpgrades(item.upgradeTrack, item.level);
+  if (remaining.length === 0) {
+    const price = craftingCost(item);
+    return price ? [{ item, track: item.upgradeTrack, fromLevel: item.level, toLevel: item.level,
+                      crest: price.crest, crests: price.crests }] : [];
+  }
+
+  return remaining.map((rank: UpgradeCost) => ({
     item,
     track: item.upgradeTrack,
     // Where the piece actually starts from. A ladder is walked a rank at a time, so the rank's own start is right.

@@ -2,6 +2,8 @@
 import { getTranslatedItemName } from "../../Engine/ItemUtilities";
 import Item from "../../Items/Item";
 import { getEmbellishmentByEffectName } from "Databases/EmbellishmentDB";
+import { craftingCostOfSet } from "Databases/CrestDB";
+import { crestBudget } from "./Engine/CrestSpending";
 
 
 class ItemSet {
@@ -219,6 +221,26 @@ class ItemSet {
     return this.itemList.filter(item => item.id === itemID).length > 0
   }
 
+  /**
+   * Whether the crafted pieces in this set are ones the player could actually pay for.
+   *
+   * A crafted piece the player doesn't own costs 80 crests to have upgraded, so a set wearing two of them costs 160
+   * - and a set that needs more crests than the character has is not a set they can wear, however well it scores.
+   * Without this, adding two crafted pieces to compare them produces a winner wearing both.
+   *
+   * Only applies while crest spending is on: it's the feature that makes a crest a real constraint, and a run with
+   * it off ranks sets exactly as it did before. The budget comes from the crest boxes, which the import seeds and
+   * which are the budget from then on.
+   */
+  affordable(settings: any = {}) {
+    if (!settings || !settings.crestSpending) return true;
+    if (!(settings.crestSpending.value === true || settings.crestSpending.value === "true")) return true;
+
+    const cost = craftingCostOfSet(this.itemList);
+    const budget = crestBudget({}, settings);
+    return Object.keys(cost).every((currency: any) => (budget[currency] || 0) >= cost[currency]);
+  }
+
   // Verifies that the set is usable in game. We'll test if it has the correct number of embellishments, no more than 1 vault item and so on.
   verifySet(settings = {}) {
     /*
@@ -228,7 +250,10 @@ class ItemSet {
 
       return false;
     }  */
-    if (this.uniques["embellishment"] && this.uniques["embellishment"] > 2) {
+    if (!this.affordable(settings)) {
+      return false;
+    }
+    else if (this.uniques["embellishment"] && this.uniques["embellishment"] > 2) {
       return false;
     } 
     else if (this.uniques["vault"] && this.uniques["vault"] > 1) {

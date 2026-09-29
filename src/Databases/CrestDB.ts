@@ -96,6 +96,38 @@ export const crestCurrency = (crest: string): number => {
 export const isCraftedTrack = (track: string): boolean => track in CRAFTED_TRACKS;
 
 /**
+ * What it costs in crests to have a piece the player doesn't own yet, before any upgrade is planned.
+ *
+ * Only crafted gear costs anything to obtain: a drop costs nothing but luck, and a piece already worn is paid for.
+ * A crafted piece is made at its base level for free, so it is the upgrade above that base which costs - 80 crests
+ * of its track's tier, whether the player crafts it and upgrades it or is handed it at the ceiling. Entering one at
+ * 331 to try it therefore has to be charged, or the set wearing it is being compared as though it were free.
+ */
+export const craftingCost = (item: any): { crest: string; crests: number } | null => {
+  if (!item || !item.upgradeTrack || !isCraftedTrack(item.upgradeTrack)) return null;
+  if (item.isEquipped) return null;               // already owned, already paid for
+  if ((item.level || 0) <= CRAFTED_BASE_LEVEL) return null; // craftable for nothing at this level
+
+  return { crest: CRAFTED_TRACKS[item.upgradeTrack], crests: CRAFTED_UPGRADE_CRESTS };
+};
+
+/**
+ * What a whole set costs to assemble, per crest tier. Sets are compared on healing, so one that quietly needs 160
+ * Myth crests the player hasn't got would otherwise win against one they could actually wear.
+ */
+export const craftingCostOfSet = (items: any[]): { [currencyID: number]: number } => {
+  const cost: { [currencyID: number]: number } = {};
+
+  (items || []).forEach((item) => {
+    const price = craftingCost(item);
+    if (!price) return;
+    const currency = crestCurrency(price.crest);
+    if (currency) cost[currency] = (cost[currency] || 0) + price.crests;
+  });
+  return cost;
+};
+
+/**
  * The ranks still available to an item, from where it is now to the top of its track.
  *
  * A ladder is walked a rank at a time, so the ranks left are the ones starting at or above where the piece sits.
