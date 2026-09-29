@@ -112,6 +112,16 @@ describe("The step a crest plan is offered for a crafted piece", () => {
     expect(upgradeStepsFor(crafted(331))).toEqual([]);
   });
 
+  test("a ladder piece's later ranks start where the rank starts, not where the piece is", () => {
+    // A ladder is climbed a rank at a time, so only the first rank starts from the piece. Using the piece's level
+    // throughout would describe every later rank as another climb from the bottom.
+    const steps = upgradeStepsFor({ id: 2, slot: "Head", level: 308, upgradeTrack: "Hero" });
+
+    expect(steps.length).toBeGreaterThan(1);
+    expect(steps[0].fromLevel).toBe(308);
+    steps.forEach((step, i) => expect(step.fromLevel).toBe(i === 0 ? 308 : steps[i - 1].toLevel));
+  });
+
   test("a crafted piece with no track set offers nothing", () => {
     // Which is why the track has to be askable for - see the crafted options in ItemBar.
     expect(upgradeStepsFor({ id: 1, slot: "Chest", level: 305, upgradeTrack: "" })).toEqual([]);
