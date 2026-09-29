@@ -9,7 +9,7 @@ import Player from "../../Player/Player";
 import CastModel from "../../Player/CastModel";
 import { getEffectValue } from "../../../../Retail/Engine/EffectFormulas/EffectEngine";
 import { applyDiminishingReturns, getAllyStatsValue, getGemElement, getGems, isEmbellished, getGearOption,
-         buildChoiceCombinations, countChoiceCombinations, pinnedSlots, isOptimizeAllGear, keepsExistingGear } from "General/Engine/ItemUtilities";
+         buildChoiceCombinations, countChoiceCombinations, pinnedSlots, isOptimizeAllGear, keepsExistingGear, getItemProp} from "General/Engine/ItemUtilities";
 import { reportError } from "General/SystemTools/ErrorLogging/ErrorReporting";
 import { getTrinketValue } from "Retail/Engine/EffectFormulas/Generic/Trinkets/TrinketEffectFormulas";
 import { allRamps, allRampsHealing, getDefaultDiscTalents } from "General/Modules/Player/ClassDefaults/DisciplinePriest/DiscRampUtilities";
@@ -862,8 +862,19 @@ export function runTopGear(rawItemList: Item[], wepCombos: Item[], player: Playe
 // Rings and trinkets are worn two at a time, so those slots enumerate unordered pairs rather than a full product.
 // The set count reported to the player and the loops that build the sets both go through these, so the bar can't
 // promise a total the build never reaches.
+// Crafted rings aren't unique-equipped, so two of the same one can be worn - which is the whole point of copying
+// one to try a different pair of stats or a different embellishment on it. Read from the item database rather than
+// added to the list of ids below, so a ring crafted next season needs no edit here. Memoised because this is asked
+// once per pair while counting and again while building, and the lookup walks the database.
+const craftedItems = new Map<number, boolean>();
+const isCraftedItem = (id: number): boolean => {
+  if (!craftedItems.has(id)) craftedItems.set(id, !!getItemProp(id, "crafted", "Retail"));
+  return craftedItems.get(id) as boolean;
+};
+
 const ringsCanPair = (a: Item, b: Item) =>
-  a.id !== b.id || a.id === 215130 || b.id === 215130 || a.id === 215137 || b.id === 215137 ||
+  a.id !== b.id || isCraftedItem(a.id) ||
+  a.id === 215130 || b.id === 215130 || a.id === 215137 || b.id === 215137 ||
   a.id === 215135 || a.id === 240951;
 const trinketsCanPair = (a: Item, b: Item) => a.id !== b.id;
 

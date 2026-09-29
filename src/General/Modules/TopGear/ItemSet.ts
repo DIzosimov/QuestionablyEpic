@@ -265,9 +265,6 @@ class ItemSet {
     else if (this.uniques["alchstone"] && this.uniques["alchstone"] > 1) {
       return false;
     }
-    else if (this.uniques["crafted"] && this.uniques["crafted"] > 1) {
-      return false;
-    }
     // TODO: Come back to this when TopGearEngine has been converted to TS and remove the any override.
     else if (this.uniques["catalyst"] && 'catalystLimit' in settings && this.uniques["catalyst"] > ((settings.catalystLimit as any).value as any)) {
       return false;
