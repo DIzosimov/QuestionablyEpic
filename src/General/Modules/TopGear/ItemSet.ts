@@ -122,6 +122,10 @@ class ItemSet {
         mana: 0, // Evoker 2091
         manaPerc: 1, // For percentage mana increases (usually enchants / metagem, not for talents)
         allyStats: 0,
+        // Added to the spec's crit multiplier: 0.02 is "+2% critical strike effectiveness". Declared here because
+        // compileStats merges only the keys the set already has, so a stat missing from this list is silently
+        // dropped however much of it the gear grants.
+        critMultBonus: 0,
         bonusHPS: 0, // Percent increases to score.
       } :
       {

@@ -6,7 +6,7 @@
 // selection UI offers from here, so the two can't drift apart the way the embellishment lists did.
 //
 // `stats` are flat additions. `procStats` are applied at the enchant's uptime rather than in full, which is how
-// the weapon enchants behave. `manaPerc` is multiplicative.
+// the weapon enchants behave. `manaPerc` is multiplicative. `critMult` adds to the crit multiplier.
 
 export type EnchantEntry = {
   id: string; // stable key, used as the setting value
@@ -15,6 +15,9 @@ export type EnchantEntry = {
   stats?: { [key: string]: number };
   procStats?: { [key: string]: number }; // scaled by the enchant's proc uptime
   manaPerc?: number;
+  // Added to the crit multiplier, so 0.02 is "increases critical strike effectiveness by 2%". Worth more to a spec
+  // with more crit and more of its healing coming from crits, which is why it isn't expressed as a flat stat.
+  critMult?: number;
   specRestriction?: string[]; // only offered / defaulted for these specs
   isDefaultFor?: string[]; // specs this is the automatic pick for
   // The enchantment id SimC reports as enchant_id. Distinct from both the scroll's item id and the enchant's
@@ -39,10 +42,10 @@ export const enchantDB: EnchantEntry[] = [
   { id: "Nature's Fury", name: "Nature's Fury", enchantID: 7997, slots: ["Finger"], stats: { crit: 29 } },
   { id: "Zul'jin's Mastery", name: "Zul'jin's Mastery", enchantID: 7969, slots: ["Finger"], stats: { mastery: 29 } },
   { id: "Silvermoon's Tenacity", name: "Silvermoon's Tenacity", enchantID: 8027, slots: ["Finger"], stats: { versatility: 29 } },
-  // Eyes of the Eagle is the name these two specs see. It grants the same budget as the others, applied to their
-  // best stat rather than a fixed one.
-  { id: "Eyes of the Eagle", name: "Eyes of the Eagle", enchantID: 7967, slots: ["Finger"], stats: { [BEST_SECONDARY]: 29 },
-    specRestriction: ["Holy Priest", "Restoration Shaman"], isDefaultFor: ["Holy Priest", "Restoration Shaman"] },
+  // Not a stat enchant at all: it raises how much a crit heals for rather than how often one happens. Item 243957,
+  // spell 1236059. Offered to every spec, and the default for none - what it is worth depends on the spec's crit and
+  // on how much of its healing crits at all, so it has to be scored rather than assumed.
+  { id: "Eyes of the Eagle", name: "Eyes of the Eagle", enchantID: 7967, slots: ["Finger"], critMult: 0.02 },
 
   /* -------------------------------------------- Head ------------------------------------------- */
   { id: "Empowered Hex of Leeching", name: "Empowered Hex of Leeching", enchantID: 7961, slots: ["Head"], stats: { leech: 55 } },

@@ -1357,10 +1357,13 @@ describe("Enchants that grant your best secondary", () => {
       .toContain(searched.itemSet.enchantBreakdown["CombinedWeapon"]);
   });
 
-  test("Eyes of the Eagle still grants the ring budget to the best stat", () => {
-    // It moved from a hardcoded branch in the engine to the same marker, so its value must not have moved with it.
+  test("Eyes of the Eagle raises the crit multiplier rather than granting stats", () => {
+    // It was modelled as a flat stat on the best secondary. It is a crit effectiveness enchant, so it carries no
+    // stats at all and its value has to come out of the spec's own crit - see CritEffectEnchant.test.js.
     const eagle = getEnchantById("Eyes of the Eagle");
-    expect(eagle.stats).toEqual({ [BEST_SECONDARY]: 29 });
+
+    expect(eagle.critMult).toEqual(0.02);
+    expect(eagle.stats).toBeUndefined();
   });
 });
 

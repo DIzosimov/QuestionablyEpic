@@ -56,12 +56,13 @@ describe("Per-spec defaults match the old hardcoded branches", () => {
     expect(getDefaultEnchant("CombinedWeapon", "Holy Paladin").id).toEqual("Acuity of the Ren'dorei");
   });
 
-  test("Eyes of the Eagle is offered only to the two specs that use it", () => {
-    ["Holy Priest", "Restoration Shaman"].forEach((spec) => {
+  test("Eyes of the Eagle is offered to every spec and defaulted for none", () => {
+    // It was modelled as the name two specs saw for a flat stat enchant. It isn't that - it raises how much a crit
+    // heals for, which is worth a different amount to every spec, so it is scored rather than assumed.
+    ["Holy Priest", "Restoration Shaman", "Preservation Evoker"].forEach((spec) => {
       expect(getEnchantsForSlot("Finger", spec).map((e) => e.id)).toContain("Eyes of the Eagle");
-      expect(getDefaultEnchant("Finger", spec).id).toEqual("Eyes of the Eagle");
+      expect(getDefaultEnchant("Finger", spec).id).not.toEqual("Eyes of the Eagle");
     });
-    expect(getEnchantsForSlot("Finger", "Preservation Evoker").map((e) => e.id)).not.toContain("Eyes of the Eagle");
   });
 });
 

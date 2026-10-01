@@ -1367,6 +1367,9 @@ function applyEnchant(bonus_stats: Stats, enchant: any, highestWeight: string) {
     Object.keys(enchant.procStats).forEach((stat) => add(stat, enchant.procStats[stat] * uptime));
   }
   if (enchant.manaPerc) bonus_stats.manaPerc = (bonus_stats.manaPerc || 1) * enchant.manaPerc;
+  // A bonus to the multiplier rather than the multiplier itself, so two of them add up and a set carrying none
+  // leaves the spec's own figure alone.
+  if (enchant.critMult) bonus_stats.critMultBonus = (bonus_stats.critMultBonus || 0) + enchant.critMult;
 }
 
 /**
@@ -1523,6 +1526,7 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
     manaPerc: 1, // Mana *pool* increases
     allyStats: 0,
     critMult: 1, // Bonuses to the crit multiplier
+    critMultBonus: 0, // Added to the spec's crit multiplier: 0.02 is "+2% critical strike effectiveness"
   };
 
 
@@ -1979,6 +1983,7 @@ export function mergeBonusStats(stats: any) {
     mana: mergeStat(stats, "mana"),
     manaPerc: mergeStat(stats, "manaPerc"),
     allyStats: mergeStat(stats, "allyStats"),
+    critMultBonus: mergeStat(stats, "critMultBonus"),
     bonusHPS: mergeStat(stats, "bonusHPS")
 
   };

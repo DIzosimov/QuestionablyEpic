@@ -99,7 +99,10 @@ export function scoreEvokerSet(stats: Stats, playerData: any, settings: PlayerSe
     const state = { fightLength: 6, spec: spec, statPercentages: convertStatPercentages(stats, initialState.statBonuses, spec, playerData.masteryEffectiveness), 
         settings: settings, talents: evokerTalents};
 
-    state.statPercentages.critMult = 2.6//26// 1.3 * 1.02 + 1;
+    // Preservation's own figure, which replaces rather than adjusts the generic one. Gear's contribution is added
+    // back on afterwards, or an enchant raising crit effectiveness would be worth nothing at all to this spec -
+    // silently, since the set would simply score the same.
+    state.statPercentages.critMult = 2.6 + ((stats as any).critMultBonus || 0); //26// 1.3 * 1.02 + 1;
     const incomingDTPS = 60000;
     const burstDTPS = 80000; 
 
