@@ -232,7 +232,20 @@ export const getSpellThroughput = (spell, statPercentages, spec, settings, flags
 
     if (spell.spellType === "heal" || spell.buffType === "heal") {
         spellOutput *= (spell.specialFields?.absorb ? 1 : statPercentages.genericHealingMult);
-        spellOutput *= (flags['overrideOverhealing'] ? (1 - flags['overrideOverhealing']) : (1 - spell.expectedOverheal));
+        const overheal = flags['overrideOverhealing'] ? flags['overrideOverhealing'] : spell.expectedOverheal;
+        spellOutput *= (1 - overheal);
+
+        // Crits overheal more than normal heals, so the crit share of the heal is discounted at a higher rate.
+        // spellOutput carries (1 - p) + p * critSize from critMult above, all at one overheal rate; this rescales so
+        // the normal share keeps that rate and the crit share pays `critOverhealPremium` points more. Zero for every
+        // spec that doesn't set it, and absorbs are left alone - a shield doesn't overheal the way a heal does.
+        const premium = statPercentages.critOverhealPremium || 0;
+        if (premium > 0 && adjCritChance > 0 && overheal < 1 && !spell.specialFields?.absorb) {
+            const normalShare = 1 - adjCritChance;
+            const critShare = adjCritChance * critSize;
+            const critOverheal = Math.min(1, overheal + premium);
+            spellOutput *= (normalShare * (1 - overheal) + critShare * (1 - critOverheal)) / ((normalShare + critShare) * (1 - overheal));
+        }
 
         if (spell.targetScript) {
             targetCount = getTargetScript(spell.targetScript, spell.targets, spell.specialFields)

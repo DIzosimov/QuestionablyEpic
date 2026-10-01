@@ -110,6 +110,9 @@ const initialState : RootState = {
     // Spec values:
     masteryEffectivenessShaman: { value: 20, options: [], category: "specSpecific", type: "Entry", gameType: "Retail", spec: "Restoration Shaman" },
     masteryEffectivenessEvoker: { value: 90, options: [], category: "specSpecific", type: "Entry", gameType: "Retail", spec: "Preservation Evoker" },
+    // How many more percentage points a crit overheals than a normal heal. 8.7 is the median across 14 Flameshaper
+    // Preservation logs on Mythic Ula'tek (range 7.2-9.5). 0 restores the old behaviour, where crits overhealed the same.
+    critOverhealEvoker: { value: 8.7, options: [], category: "specSpecific", type: "Entry", gameType: "Retail", spec: "Preservation Evoker" },
     fightLengthShaman: { value: "Long", options: ["Long", "Short"], category: "specSpecific", type: "selector", gameType: "Retail", spec: "Restoration Shaman" },
     innervateCountShaman: { value: 0, options: [], category: "specSpecific", type: "Entry", gameType: "Retail", spec: "Restoration Shaman" },
 

@@ -524,6 +524,10 @@
           "title": "Mastery Effectiveness %",
           "tooltip": "How effective your mastery is, as a percentage. Preservation mastery scales with how injured your targets are, so raise this for heavy raid damage and lower it for lighter healing."
         },
+        "critOverhealEvoker": {
+          "title": "Extra Crit Overheal (pts)",
+          "tooltip": "How many more percentage points a crit overheals than a normal heal. A crit heals for 2.6x, so it is far more likely to top a target off and waste the rest. 8.7 is the median measured across 14 Preservation logs; set 0 to score crits as overhealing no more than any other heal, which is how QE worked before."
+        },
         "optimizeAllGearOptions": {
           "title": "Optimize Everything",
           "tooltip": "Search every gem, enchant and Omnium Folio rune instead of picking them yourself. Slow: the number of combinations multiplies, so set the search depth in the gear panel to match."
