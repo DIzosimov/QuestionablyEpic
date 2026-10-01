@@ -5,6 +5,7 @@ import { buildNewWepCombos } from "General/Engine/ItemUtilities";
 import { runTopGear } from "General/Modules/TopGear/Engine/TopGearEngine";
 import { getEnchantsForSlot, getEnchantById } from "./EnchantDB";
 import { convertStatPercentages } from "General/Modules/Player/ClassDefaults/Generic/ProfileUtilities";
+import { scoreEvokerSet } from "General/Modules/Player/ClassDefaults/PreservationEvoker/PreservationEvokerProfile";
 import rootReducer from "Redux/Reducers/RootReducer";
 
 /*
@@ -80,11 +81,22 @@ describe("The crit effectiveness enchant", () => {
       .not.toBeCloseTo(scoreWith("Restoration Druid", "Silvermoon's Alacrity"));
   });
 
-  test("Preservation Evoker gets it too, and it sets its own crit multiplier", () => {
-    // Preservation replaces the generic multiplier rather than adjusting it, so the bonus has to be added back on
-    // or the enchant is worth exactly nothing to this spec, with nothing in the output saying so.
+  test("Preservation Evoker is offered it, and the set's stats carry it", () => {
+    expect(getEnchantsForSlot("Finger", "Preservation Evoker").map((e) => e.id)).toContain("Eyes of the Eagle");
     expect(statsOf("Preservation Evoker", "Eyes of the Eagle").critMultBonus).toBeCloseTo(0.04);
-    expect(scoreWith("Preservation Evoker", "Eyes of the Eagle"))
-      .not.toBeCloseTo(scoreWith("Preservation Evoker", "Silvermoon's Alacrity"));
+  });
+
+  test("Preservation Evoker is scored with the bonus despite overriding the multiplier", () => {
+    // The spec replaces the generic crit multiplier with its own figure rather than adjusting it, so the bonus has
+    // to be added back on. Scored directly with and without it: comparing two different enchants instead would
+    // differ on their stats and pass whether or not the bonus survived.
+    const gear = { intellect: 40000, crit: 8000, haste: 6000, mastery: 4000, versatility: 3000, leech: 0,
+                   hps: 0, dps: 0, mana: 0, manaPerc: 1, allyStats: 0, bonusHPS: 0, critMultBonus: 0 };
+    const playerData = { heroTree: "", masteryEffectiveness: 1, tierSets: [] };
+
+    const plain = scoreEvokerSet({ ...gear }, playerData, {}).healing;
+    const raised = scoreEvokerSet({ ...gear, critMultBonus: 0.04 }, playerData, {}).healing;
+
+    expect(raised).toBeGreaterThan(plain);
   });
 });
