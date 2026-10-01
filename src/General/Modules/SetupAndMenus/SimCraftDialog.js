@@ -15,7 +15,10 @@ import {
 } from "@mui/material";
 import { runSimC } from "General/Items/GearImport/SimCImportEngine";
 import { runClassicGearImport } from "General/Items/GearImport/ClassicImportEngine";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
+import { togglePlayerSettings } from "Redux/Actions";
+import { crestSettingKey } from "General/Modules/TopGear/Engine/CrestSpending";
+import { CREST_CURRENCIES } from "Databases/CrestDB";
 import { styled } from "@mui/system";
 
 const StyledButton = styled(Button)(({ theme }) => ({
@@ -42,6 +45,7 @@ export default function SimCraftInput(props) {
   const characterCount = props.allChars.getAllChar().length || 0;
   const buttonVariant = props.variant;
   const gameType = useSelector((state) => state.gameType);
+  const settingsDispatch = useDispatch();
   const addonLink =
     gameType === "Classic"
       ? "https://www.curseforge.com/wow/addons/qe-live-gear-importer-Classic"
@@ -56,8 +60,28 @@ export default function SimCraftInput(props) {
     setOpen(false);
   };
 
+  /**
+   * Puts the crests the import just read into the settings boxes.
+   *
+   * They're editable, so the import seeds them rather than owning them - the numbers show what the character
+   * actually has, and can then be changed to ask what a plan would look like with crests not earned yet.
+   */
+  const seedCrestSettings = () => {
+    const held = (props.player.upgradeCurrency || {}).currencies || {};
+    const updated = { ...playerSettings };
+
+    Object.entries(CREST_CURRENCIES).forEach(([currencyID, crest]) => {
+      const key = crestSettingKey(crest);
+      if (updated[key]) updated[key] = { ...updated[key], value: held[currencyID] || 0 };
+    });
+    settingsDispatch(togglePlayerSettings(updated));
+  };
+
   const handleSubmit = () => {
-      if (gameType === "Retail") runSimC(simC, props.player, contentType, setErrorMessage, props.simcSnack, handleClose, setSimC, playerSettings, props.allChars, autoUpgradeVault, autoUpgradeAll, autoCatalyze); // Add autoUpgradeVault here.
+      if (gameType === "Retail") {
+        runSimC(simC, props.player, contentType, setErrorMessage, props.simcSnack, handleClose, setSimC, playerSettings, props.allChars, autoUpgradeVault, autoUpgradeAll, autoCatalyze); // Add autoUpgradeVault here.
+        seedCrestSettings();
+      }
       else runClassicGearImport(simC, props.player, contentType, setErrorMessage, props.simcSnack, handleClose, setSimC, props.allChars, autoUpgradeAll);
   };
 

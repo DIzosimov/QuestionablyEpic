@@ -1,5 +1,5 @@
 import itemDB from "Databases/ItemDB.json";
-import { embellishmentDB } from "../../Databases/EmbellishmentDB";
+import { embellishmentDB, getApplicableEmbellishments, getEmbellishmentForItem } from "../../Databases/EmbellishmentDB";
 import { getOnyxAnnuletEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/OnyxAnnuletData";
 import { getCircletEffect } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/CyrcesCircletData";
 import classicItemDB from "Databases/ClassicItemDB.json";
@@ -383,28 +383,23 @@ export function getItemLevelBoost(bossID: number, difficulty: number) {
 }
 
 // Sometimes items have an optional effect that can be added to them. Embellishments for example, or different variations (Changeling / Circlet).
+// The embellishment list is generated from EmbellishmentDB rather than hardcoded here. Hardcoding it meant every new patch
+// silently shipped a dropdown that was missing embellishments we already had working formulas for.
 export const getItemEffectOptions = (itemID: number, gameType: gameTypes = "Retail"): { type: string; label: string; effectName: string }[] => {
   const options: { type: string; label: string; effectName: string }[] = []; // type: "embellishment", label: "Add Embellishment: Writhing Armor Banding", effectName: "Writhing Armor Banding"
   const item = getItem(itemID);
+  if (!item) return options;
+
   const isEngineering = getItemProp(itemID, "engineering");
 
   if (getItemProp(item.id, "crafted")) {
     // Crafted item effects are limited to Embellishments currently.
-    if (item.slot.includes("Weapon") || item.slot === "Offhand") {
-      // Sigil embellishments are limited to weapon and offhand slots. Does NOT include Shields.
-      options.push({type: "embellishment", label: "Darkmoon Sigil: Hunt", effectName: "Darkmoon Sigil: Hunt"})
-      options.push({type: "embellishment", label: "Darkmoon Sigil: Void", effectName: "Darkmoon Sigil: Void"})
-      options.push({type: "embellishment", label: "Hunter's Ritual Stone", effectName: "Hunter's Ritual Stone"})
-      //options.push({type: "embellishment", label: "Darkmoon Sigil: Symbiosis", effectName: "Darkmoon Sigil: Symbiosis"})
+    // Engineering pieces take their own tinkers and can't hold a normal embellishment.
+    if (!isEngineering) {
+      getApplicableEmbellishments(item.slot).forEach((embel) => {
+        options.push({ type: "embellishment", label: embel.name, effectName: embel.effect.name });
+      });
     }
-    if (item.slot !== "Finger" && item.slot !== "Neck" && !item.slot.includes("Weapon") && !isEngineering) {
-      // Linings & Armor Banding are limited to non-weapon, non-jewelry slots.
-      options.push({type: "embellishment", label: "Arcanoweave Lining", effectName: "Arcanoweave Lining"})
-      options.push({type: "embellishment", label: "Primal Spore Binding", effectName: "Primal Spore Binding"})
-      options.push({type: "embellishment", label: "Blessed Pango Charm", effectName: "Blessed Pango Charm"})
-      options.push({type: "embellishment", label: "Adorned Fang", effectName: "Adorned Fang"})
-    }
-    
   }
   // Now, we can also add non-embellishment options here but we don't have any prominent ones yet so TODO.
 
@@ -667,6 +662,43 @@ export function checkDefaultSocket(id: number) {
 }
 
 // Returns item stat allocations. MUST be converted to stats before it's used in any scoring capacity.
+// The number of embellishments a character can wear at once. Exceeding it makes a set unwearable in game, so
+// Top Gear discards those sets entirely - which looks like the item you just added being ignored.
+export const MAX_EMBELLISHMENTS = 2;
+
+// True if wearing this item uses up one of the player's embellishment slots.
+export function isEmbellished(item: any) {
+  if (!item) return false;
+  return (typeof item.uniqueEquip === "string" && item.uniqueEquip.toLowerCase() === "embellishment") ||
+         (!!item.effect && item.effect.type === "embellishment");
+}
+
+// Counts the embellishments the player is forced to wear: slots where every selected item is embellished leave no
+// choice. If that forced total exceeds the cap then no wearable set exists at all and Top Gear will return nothing,
+// so we can tell the player up front instead of handing them an empty report.
+export function getForcedEmbellishmentCount(itemList: any[]) {
+  const bySlot: { [key: string]: { total: number; embellished: number } } = {};
+
+  itemList.forEach((item) => {
+    // Weapons are combined separately and a set only ever takes one combination, so count them as a single slot.
+    const slot = ["1H Weapon", "2H Weapon", "Offhand", "Holdable", "Shield"].includes(item.slot) ? "Weapon" : item.slot;
+    if (!bySlot[slot]) bySlot[slot] = { total: 0, embellished: 0 };
+    bySlot[slot].total += 1;
+    if (isEmbellished(item)) bySlot[slot].embellished += 1;
+  });
+
+  return Object.keys(bySlot).filter((slot) => bySlot[slot].total > 0 && bySlot[slot].total === bySlot[slot].embellished).length;
+}
+
+// Returns true if the item has stat budget for the player to assign. Generic crafted gear is all unallocated, so
+// this is almost always true - it's the fixed-embellished items (and a handful of older pieces) that arrive with
+// their secondaries already set, and offering a stat picker on those does nothing but mislead.
+export function hasUnallocatedStats(id: number, gameType: gameTypes = "Retail") {
+  const item = getItem(id, gameType);
+  if (!item || !item.stats) return false;
+  return "unallocated" in item.stats || "unallocated2" in item.stats;
+}
+
 export function getItemAllocations(id: number, missiveStats: any[] = [], gameType: gameTypes = "Retail") {
   const item = getItem(id, gameType);
 
@@ -738,6 +770,7 @@ export function buildNewWepCombos(player: Player, active: boolean = false, equip
   for (let i = 0; i < main_hands.length; i++) {
     // Some say j is the best variable for a nested loop, but are they right?
     let main_hand = main_hands[i];
+    let paired = false;
     for (let k = 0; k < off_hands.length; k++) {
       let off_hand = off_hands[k];
 
@@ -747,8 +780,14 @@ export function buildNewWepCombos(player: Player, active: boolean = false, equip
       } else {
         const combo = [main_hand, off_hand];
         combos.push(combo);
+        paired = true;
       }
     }
+
+    // A one hander that couldn't be paired with anything still has to be offered on its own. Dropping it used to
+    // make the weapon invisible to Top Gear, and if it was the player's only weapon there were no valid combos at
+    // all, which meant zero sets and an empty report rather than a result with an empty offhand slot.
+    if (!paired) combos.push([main_hand]);
   }
 
   for (let j = 0; j < two_handers.length; j++) {
@@ -1346,3 +1385,163 @@ function sumObjectsByKey<T extends Record<string | number, number>>(objs: T[]): 
     return result;
   }, {} as T);
 } */
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                              Detailed gear options: gems, enchants, runes                       */
+/* ---------------------------------------------------------------------------------------------- */
+// Pinning gems, enchants and Folio runes is opt-in. With the toggle off every one of those settings reads as its
+// Automatic default, so a profile configured once and then switched back to the simple view can't keep steering
+// later runs from a panel the player has collapsed.
+
+// The settings panel writes checkbox and dropdown values straight through, so tolerate the string form.
+const isOn = (userSettings: any, key: string) => {
+  const setting = userSettings && typeof userSettings === "object" ? userSettings[key] : null;
+  return !!setting && (setting.value === true || setting.value === "true");
+};
+
+export const isDetailedGearOptions = (userSettings: any): boolean => isOn(userSettings, "detailedGearOptions");
+
+/**
+ * Optimise everything: instead of the player pinning options, Top Gear searches every gem, enchant and Folio rune
+ * alongside its normal gear search and ranks the lot. Implies the detailed options, since it drives them.
+ */
+export const isOptimizeAllGear = (userSettings: any): boolean => isOn(userSettings, "optimizeAllGearOptions");
+
+/** Reads one of the detailed gear options, or its Automatic fallback while both toggles are off. */
+export function getGearOption(userSettings: any, key: string, fallback: any): any {
+  if (!isDetailedGearOptions(userSettings) && !isOptimizeAllGear(userSettings)) return fallback;
+  const setting = userSettings[key];
+  return setting && setting.value !== undefined ? setting.value : fallback;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                     Multi-select expansion                                      */
+/* ---------------------------------------------------------------------------------------------- */
+// Gems, enchants and Folio runes all let the player pin several options per slot, and all three expand a run into
+// one variant per combination. That expansion is the same cartesian product every time, so it lives here rather
+// than being written out once per feature.
+
+export type SlotChoices = { [slot: string]: any[] };
+
+/** Drops slots with nothing pinned, since they contribute no combinations. */
+export function pinnedSlots(choices: SlotChoices): SlotChoices {
+  const pinned: SlotChoices = {};
+  Object.keys(choices || {}).forEach((slot) => {
+    if (Array.isArray(choices[slot]) && choices[slot].length > 0) pinned[slot] = choices[slot];
+  });
+  return pinned;
+}
+
+/**
+ * Every combination of one pinned choice per slot, as complete { slot: choice } overrides.
+ * Nothing pinned yields no combinations at all, which callers read as "leave it to the engine".
+ */
+export function buildChoiceCombinations(choices: SlotChoices, cap: number = Infinity): any[] {
+  const slots = Object.keys(pinnedSlots(choices));
+  if (slots.length === 0) return [];
+
+  return slots.reduce((combinations: any[], slot) => {
+    const next: any[] = [];
+    combinations.forEach((combo) =>
+      choices[slot].forEach((choice) => {
+        if (next.length < cap) next.push({ ...combo, [slot]: choice });
+      }));
+    return next;
+  }, [{}]);
+}
+
+/** How many combinations buildChoiceCombinations would produce, without paying to build them. */
+export function countChoiceCombinations(choices: SlotChoices): number {
+  const counts = Object.values(pinnedSlots(choices)).map((list) => list.length);
+  return counts.length === 0 ? 0 : counts.reduce((total, n) => total * n, 1);
+}
+
+
+/* ---------------------------------- Crafted stat combinations ---------------------------------- */
+// A crafted item's two secondaries are chosen when it's made. These are shared by the add-item form and by
+// duplicating an item with a different combination, so the two can't disagree about what a combination means.
+
+/** The stat combinations a crafted item can be made with. Random-stat items can take them in either order. */
+export const CRAFTED_STAT_CHOICES = [
+  "Haste / Versatility", "Haste / Mastery", "Haste / Crit",
+  "Crit / Mastery", "Crit / Versatility", "Mastery / Versatility",
+];
+export const CRAFTED_STAT_CHOICES_RANDOM = [
+  "Haste / Versatility", "Haste / Mastery", "Haste / Crit",
+  "Crit / Versatility", "Crit / Haste", "Crit / Mastery",
+  "Mastery / Haste", "Mastery / Crit", "Mastery / Versatility",
+  "Versatility / Haste", "Versatility / Crit", "Versatility / Mastery",
+];
+export const CRAFTED_STAT_CHOICES_ENGINEERING = [
+  "Haste (engineering)", "Crit (engineering)", "Mastery (engineering)", "Versatility (engineering)",
+];
+
+/** "Haste / Versatility" becomes ["haste", "versatility"]. */
+export const parseMissives = (missives: string): string[] =>
+  missives.toLowerCase().replace(" (engineering)", "").replace(/ /g, "").split("/");
+
+// The allocation ids a random-stat item carries for each secondary.
+const RANDOM_STAT_IDS: { [stat: string]: number } = { haste: 36, crit: 32, versatility: 40, mastery: 49 };
+export const craftedStatIDs = (missiveStats: string[]): number[] =>
+  missiveStats.map((stat) => RANDOM_STAT_IDS[stat]).filter((id) => id !== undefined);
+
+// The bonus ids a missive-crafted item carries, which drive the Wowhead tooltip.
+const MISSIVE_BONUS_IDS: { [stat: string]: string } = { haste: ":6649", mastery: ":6648", crit: ":6647", versatility: ":6650" };
+export const missiveBonusIDs = (missiveStats: string[]): string =>
+  missiveStats.map((stat) => MISSIVE_BONUS_IDS[stat] || "").join("");
+
+/** The combination an item was made with, as it appears in the lists above. Empty when it has none. */
+export const craftedStatLabel = (item: any): string => {
+  const stats = item.missiveStats && item.missiveStats.length > 0
+    ? item.missiveStats
+    : Object.keys(RANDOM_STAT_IDS).filter((stat) => (item.craftedStats || []).includes(RANDOM_STAT_IDS[stat]));
+  if (!stats || stats.length === 0) return "";
+
+  const titled = stats.map((stat: string) => stat.charAt(0).toUpperCase() + stat.slice(1));
+  return titled.join(" / ");
+};
+
+/**
+ * Whether the player wants to keep the gems, enchants and runes they already have.
+ *
+ * Read straight from the settings rather than through getGearOption: it's a top level Top Gear option, not one of
+ * the detailed gear panel's, so it has to work on a plain run. The key still says gems because renaming it would
+ * quietly reset the choice on every saved profile.
+ */
+export function keepsExistingGear(userSettings: any): boolean {
+  const setting = userSettings ? userSettings.replaceExistingGems : undefined;
+  const value = setting && typeof setting === "object" ? setting.value : setting;
+  return value === false || value === "false";
+}
+
+
+/* ------------------------------------- Upgrade currencies -------------------------------------- */
+
+/**
+ * The crests and Valorstones a character holds, keyed by currency id.
+ *
+ * SimC reports them on a commented line: `# upgrade_currencies=c:<id>:<amount>/.../i:<itemID>:<count>`. The `c:`
+ * entries are currencies and the `i:` entries are items, which are counted separately since they aren't spent on
+ * upgrades the same way.
+ *
+ * The ids are returned as they appear. Naming them - which id is which crest tier - is game data the app doesn't
+ * carry yet, and guessing would attribute a character's crests to the wrong tier.
+ */
+export function parseUpgradeCurrencies(line: string): { currencies: { [id: number]: number }; items: { [id: number]: number } } {
+  const held: { currencies: { [id: number]: number }; items: { [id: number]: number } } = { currencies: {}, items: {} };
+  // The line is a comment in the export, so the leading hash and spacing come off first.
+  const body = (line || "").replace(/^#\s*/, "").split("=")[1];
+  if (!body) return held;
+
+  body.split("/").forEach((entry) => {
+    const [kind, id, amount] = entry.split(":");
+    const held_id = parseInt(id, 10);
+    const held_amount = parseInt(amount, 10);
+    if (!held_id || isNaN(held_amount)) return;
+
+    if (kind === "c") held.currencies[held_id] = held_amount;
+    else if (kind === "i") held.items[held_id] = held_amount;
+  });
+
+  return held;
+}

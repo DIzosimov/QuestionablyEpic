@@ -80,7 +80,16 @@ export function scoreEvokerSet(stats: Stats, playerData: any, settings: PlayerSe
     const healingBreakdown: Record<string, number> = {};
     const castBreakdown: Record<string, number> = {};
 
-    playerData.masteryEffectiveness = 0.9;
+    // Preservation mastery scales with how injured your targets are, so its real effectiveness varies a lot by
+    // content. Resto Shaman already exposes this as a setting; Evoker now does too. Falls back to the previous
+    // hardcoded 0.9 when the setting is absent so existing results are unchanged.
+    // The settings panel writes number inputs back as strings (e.target.value), so this has to coerce rather than
+    // type-check. A strict typeof check here silently fell back to the default the moment the player edited the box.
+    const masteryEffectivenessRaw = settings && settings.masteryEffectivenessEvoker ? settings.masteryEffectivenessEvoker.value : null;
+    const masteryEffectivenessPct = Number(masteryEffectivenessRaw);
+    playerData.masteryEffectiveness = Number.isFinite(masteryEffectivenessPct) && masteryEffectivenessPct > 0
+      ? masteryEffectivenessPct / 100
+      : 0.9;
 
     // Apply Talents
     const talents = initialState.talents;
@@ -90,7 +99,17 @@ export function scoreEvokerSet(stats: Stats, playerData: any, settings: PlayerSe
     const state = { fightLength: 6, spec: spec, statPercentages: convertStatPercentages(stats, initialState.statBonuses, spec, playerData.masteryEffectiveness), 
         settings: settings, talents: evokerTalents};
 
-    state.statPercentages.critMult = 2.6//26// 1.3 * 1.02 + 1;
+    // Preservation's own figure, which replaces rather than adjusts the generic one. Gear's contribution is added
+    // back on afterwards, or an enchant raising crit effectiveness would be worth nothing at all to this spec -
+    // silently, since the set would simply score the same.
+    state.statPercentages.critMult = 2.6 + ((stats as any).critMultBonus || 0); //26// 1.3 * 1.02 + 1;
+
+    // Crits overheal more than normal heals: at 2.6x they're far more likely to top a target off. Measured at a
+    // median 8.7 points more across 14 Preservation logs, which leaves crit worth ~83% of what a flat overheal
+    // credits it with. Read the same way as mastery effectiveness - the panel writes strings - and absent means 0,
+    // the old behaviour, so a caller passing no settings scores exactly as before.
+    const critOverhealRaw = Number(settings && (settings as any).critOverhealEvoker ? (settings as any).critOverhealEvoker.value : 0);
+    (state.statPercentages as any).critOverhealPremium = Number.isFinite(critOverhealRaw) && critOverhealRaw > 0 ? critOverhealRaw / 100 : 0;
     const incomingDTPS = 60000;
     const burstDTPS = 80000; 
 

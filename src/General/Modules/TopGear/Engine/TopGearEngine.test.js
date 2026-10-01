@@ -120,6 +120,7 @@ describe("MergeBonusStats function", () => {
             manaPerc: 0,
             dps: 0,
             allyStats: 0,
+            critMultBonus: 0,
             bonusHPS: 0,
         }
 
