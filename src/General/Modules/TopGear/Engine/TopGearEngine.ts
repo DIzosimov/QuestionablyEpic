@@ -392,6 +392,23 @@ export const POTION_BUFFS: { [name: string]: { [stat: string]: number } } = {
  *
  * Adding a food is a row here plus a name in CONSUMABLE_OPTIONS - no other code needs to change.
  */
+/**
+ * The secondary Amani Cornucopia lands on.
+ *
+ * In game it goes to your highest secondary rating at the moment you eat - out of combat, so before any trinket or
+ * enchant procs. That is the default. Because a player can steer it by swapping gear before eating, it can also be
+ * given to the stat worth most to the set (the spec's best weight, which is what this used to do unconditionally)
+ * or pinned to one stat.
+ *
+ * `ratings` must be the set's stats before effects are applied, which is what "out of combat" means here.
+ */
+export function cornucopiaStat(choice: any, ratings: any, bestWeighted: string): string {
+  const value = choice && typeof choice === "object" ? choice.value : choice;
+  if (value === "Best for the Set") return bestWeighted;
+  if (["Crit", "Haste", "Mastery", "Versatility"].includes(value)) return value.toLowerCase();
+  return getHighestStat(ratings) || bestWeighted;
+}
+
 export const FOOD_BUFFS: { [name: string]: { stat: string; amount: number } } = {
   "Intellect Food": { stat: "intellect", amount: 50 },
   "Amani Cornucopia": { stat: "bestSecondary", amount: 71.5 },
@@ -1559,6 +1576,31 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   compileStats(bonus_stats, enchantStats);
   statBreakdown.enchants = enchantStats;
   
+  // Gems come before consumables: they're out-of-combat stats, and the food and potion that follow pick their stat
+  // from the character's ratings at that point. Additive, so where they sit changes no score - only what those see.
+  // Sockets
+  // Check for Advanced gem setting and then run this instead of the above.
+  if (false) {
+    enchants["Gems"] = getTopGearGems(gemID, Math.max(0, builtSet.setSockets), bonus_stats );
+    
+  }
+  else {
+    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings, gemLoadout, keepEquippedGems);
+    const gemStats = getGemStats(enchants["Gems"]);
+    statBreakdown.gems = gemStats;
+
+    //enchants["Gems"] = getGems(player.spec, Math.max(0, builtSet.setSockets), bonus_stats, contentType, castModel.modelName, true);
+
+    compileStats(bonus_stats, gemStats);
+  }
+  if (enchants["Gems"].length > 1) {
+    // At least two gems, grab element of second. If we don't, then we have no elemental gems and can ignore it. 
+    setVariables.socketElement = getGemElement(enchants["Gems"][1]);
+  }
+
+  enchants["GemCount"] = builtSet.setSockets;
+  setVariables.setSockets = builtSet.setSockets;
+
   // =====================
   // ==== Consumables ====
   // =====================
@@ -1599,7 +1641,9 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
     // profile got before there was more than one, rather than silently costing the player the buff entirely.
     const foodName = FOOD_BUFFS[foodChoice] ? foodChoice : "Intellect Food";
     const food = FOOD_BUFFS[foodName];
-    const stat = food.stat === "bestSecondary" ? bestSecondary : food.stat;
+    const stat = food.stat === "bestSecondary"
+      ? cornucopiaStat(userSettings.cornucopiaStat, compileStats({ ...setStats }, bonus_stats), bestSecondary)
+      : food.stat;
 
     consumableStats[stat] = (consumableStats[stat] ?? 0) + food.amount;
     enchants.food = foodName;
@@ -1638,28 +1682,6 @@ function evalSet(rawItemSet: ItemSet, player: Player, contentType: contentTypes,
   compileStats(bonus_stats, consumableStats);
 
 
-  // Sockets
-  // Check for Advanced gem setting and then run this instead of the above.
-  if (false) {
-    enchants["Gems"] = getTopGearGems(gemID, Math.max(0, builtSet.setSockets), bonus_stats );
-    
-  }
-  else {
-    enchants["Gems"] = resolveSetGems(builtSet, player, contentType, userSettings, gemLoadout, keepEquippedGems);
-    const gemStats = getGemStats(enchants["Gems"]);
-    statBreakdown.gems = gemStats;
-
-    //enchants["Gems"] = getGems(player.spec, Math.max(0, builtSet.setSockets), bonus_stats, contentType, castModel.modelName, true);
-
-    compileStats(bonus_stats, gemStats);
-  }
-  if (enchants["Gems"].length > 1) {
-    // At least two gems, grab element of second. If we don't, then we have no elemental gems and can ignore it. 
-    setVariables.socketElement = getGemElement(enchants["Gems"][1]);
-  }
-
-  enchants["GemCount"] = builtSet.setSockets;
-  setVariables.setSockets = builtSet.setSockets;
 
   // Add together the sets base stats & any enchants or gems we've added.
   compileStats(setStats, bonus_stats);

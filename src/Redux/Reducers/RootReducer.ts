@@ -103,6 +103,9 @@ const initialState : RootState = {
 
     // Consumables. Only options with real modelled values are offered - see the consumables block in TopGearEngine.
     foodBuff: {value: "Intellect Food", options: ["Intellect Food", "Amani Cornucopia", "None"], category: "consumables", type: "selector", gameType: "Retail"},
+    // Which secondary Amani Cornucopia lands on. The game gives it to your highest secondary when you eat, out of combat
+    // and before any procs - and a player can steer that by swapping gear first, so the other options are real choices.
+    cornucopiaStat: {value: "Out-of-Combat Highest", options: ["Out-of-Combat Highest", "Best for the Set", "Crit", "Haste", "Mastery", "Versatility"], category: "consumables", type: "selector", gameType: "Retail"},
     weaponOil: {value: true, options: [true, false], category: "consumables", type: "selector", gameType: "Retail"},
     vantusRune: {value: true, options: [true, false], category: "consumables", type: "selector", gameType: "Retail"},
     liningUptime: { value: 60, options: [], category: "embellishments", type: "Entry", gameType: "Retail" },

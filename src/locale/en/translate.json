@@ -510,7 +510,11 @@
         "consumables": "Consumables",
         "foodBuff": {
           "title": "Food",
-          "tooltip": "Whether to include a food buff. Only the standard intellect food is modelled right now."
+          "tooltip": "Which food to assume. Intellect Food grants intellect; Amani Cornucopia grants a secondary stat - see Cornucopia Stat for which."
+        },
+        "cornucopiaStat": {
+          "title": "Cornucopia Stat",
+          "tooltip": "Which secondary Amani Cornucopia grants. Out-of-Combat Highest is what the game does: your highest secondary rating when you eat, before any procs. Best for the Set gives it to whichever stat is worth most to you, as if you swapped gear before eating to steer it. Or pin a stat."
         },
         "weaponOil": {
           "title": "Weapon Oil",
