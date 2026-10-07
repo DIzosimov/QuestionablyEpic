@@ -4,6 +4,7 @@ import { Card, CardContent, CardActionArea, Typography, Grid, Divider, Tooltip }
 import { getTranslatedItemName, buildStatStringSlim, getItemIcon, getItemProp, getGemProp, getGemIcon } from "../../Engine/ItemUtilities";
 import { buildPrimGems } from "../../Engine/InterfaceUtilities";
 import { reforgeIDs } from "Databases/ReforgeDB";
+import { getEnchantByEnchantID } from "Databases/EnchantDB";
 import "./MiniItemCard.css";
 import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
@@ -12,6 +13,12 @@ import WowheadTooltip from "General/Modules/GeneralComponents/WHTooltips.tsx";
 import { getTitanDiscName } from "Retail/Engine/EffectFormulas/Generic/PatchEffectItems/TitanDiscBeltData"
 import CatalyzedFromIndicator from "General/Modules/GeneralComponents/CatalyzedFromIndicator";
 
+
+// What Top Gear wants you to change gets a gold ring. It's an outline rather than a border so it sits on top of
+// the vault / exclusive / catalyst styles below, which already own the border and would otherwise hide it.
+const CHANGED_RING = "#f0c674";
+const changedItemStyle = { outline: `2px solid ${CHANGED_RING}`, outlineOffset: "-1px" };
+const changedGemStyle = { outline: `1px solid ${CHANGED_RING}`, outlineOffset: "1px", borderRadius: 2 };
 
 const useStyles = makeStyles({
   root: {
@@ -74,8 +81,19 @@ export default function ItemCardReport(props) {
   const socketImage = getGemIcon(enchants["Gems"], gameType);
   const tier = item.setID !== "" && item.slot !== "Trinket" ? <div style={{ fontSize: 10, lineHeight: 1, color: "yellow" }}>{t("Tier")}</div> : null;
   const tertiary = "leech" in item && item.leech >= 0 ? <div style={{ fontSize: 10, lineHeight: 1, color: "lime" }}>{t('Leech')}</div> : null;
+  /* ------------------------------- What changed from the equipped gear ------------------------------- */
+  // An item the player wasn't already wearing is a change in itself, so its gems aren't flagged individually -
+  // the card's own ring already says the whole piece is new.
+  const isNewItem = gameType === "Retail" && !item.isEquipped && item.slot !== "CombinedWeapon";
+  // Which of this item's gems the set as a whole didn't already have. Worked out across every equipped item in
+  // TopGearReport, because the engine assigns gems to the set rather than to a slot.
+  const newGems = item.newGems || [];
   const isEmbellishment = item.effect && item.effect.type === "embellishment";
-  const embellishmentLabel = isEmbellishment ? <div style={{ fontSize: 10, lineHeight: 1, color: "lightblue" }}>{t('Embellishment')}</div> : null;
+  // Coloured with the change ring when the piece carrying it is one the player isn't wearing, so the
+  // embellishments that actually need crafting stand out from the ones already on.
+  const embellishmentLabel = isEmbellishment
+    ? <div style={{ fontSize: 10, lineHeight: 1, color: isNewItem ? CHANGED_RING : "lightblue" }}>{t('Embellishment')}</div>
+    : null;
   const catalyzedID = item.catalyzedID || null;
   const isCatalyzed = /*Boolean(catalyzedID) ||*/ item.isCatalystItem;
   const catalyst = isCatalyzed ? <div style={{ fontSize: 10, lineHeight: 1, color: "plum" }}>{t("Catalyst")}</div> : null;
@@ -152,11 +170,13 @@ export default function ItemCardReport(props) {
     socket = <div style={{ verticalAlign: "middle" }}>{socket}</div>;
   }*/
   else if (item.socketedGems) {
-    item.socketedGems.forEach(gem => {
+    item.socketedGems.forEach((gem, socketIndex) => {
+      const changed = !isNewItem && gameType === "Retail" && newGems[socketIndex] === true;
       socket.push(
       <div style={{ display: "inline", marginRight: "5px" }}>
-        <Tooltip title={capitalizeFirstLetter(getGemProp(gem, "name"))} arrow>
-          <img src={getGemIcon(gem, gameType)} width={15} height={15} style={{ verticalAlign: "middle" }} alt="Socket" />
+        <Tooltip title={capitalizeFirstLetter(getGemProp(gem, "name")) + (changed ? " - not currently socketed" : "")} arrow>
+          <img src={getGemIcon(gem, gameType)} width={15} height={15}
+               style={{ verticalAlign: "middle", ...(changed ? changedGemStyle : {}) }} alt="Socket" />
         </Tooltip>
     </div>);
     })
@@ -171,16 +191,26 @@ export default function ItemCardReport(props) {
     </div>
   ) : null; */
 
+  // Rings share a slot name but are enchanted separately, so the report tells each card which entry is its own.
+  // Older reports were saved before the split and only have the shared Finger entry, hence the fallback.
+  // The enchant the item came in wearing, from SimC's enchant_id. Only rows carrying that id can be recognised,
+  // so an enchant we don't have the id for reads as "can't tell" and is left unmarked - better to miss a change
+  // than to tell the player to re-enchant something they already have.
+  const equippedEnchant = getEnchantByEnchantID(item.enchantID || 0);
+
   const enchantCheck = (item) => {
-    if (item.slot in enchants) {
-      let typo = (
-        <Typography variant="subtitle2" wrap="nowrap" display="block" align="left" style={{ fontSize: "12px", color: "#36ed21", paddingRight: 4 }}>
-          {enchants[item.slot]}
-        </Typography>
-      );
-      return typo;
-    }
-    return null;
+    const slot = (props.enchantSlot in enchants) ? props.enchantSlot : item.slot;
+    if (!(slot in enchants)) return null;
+
+    const recommended = enchants[slot];
+    const changed = gameType === "Retail" && Boolean(equippedEnchant) && equippedEnchant.name !== recommended;
+
+    return (
+      <Typography variant="subtitle2" wrap="nowrap" display="block" align="left"
+                  style={{ fontSize: "12px", color: changed ? CHANGED_RING : "#36ed21", paddingRight: 4 }}>
+        {recommended}
+      </Typography>
+    );
   };
 
   if (item.offhandID > 0) {
@@ -195,7 +225,7 @@ export default function ItemCardReport(props) {
       <Card
         className={isExclusive? classes.exclusive : isVault ? classes.vault : (!item.isEquipped && gameType === "Retail" && item.slot != "CombinedWeapon") ? classes.notequipped : catalyst ? classes.catalyst : classes.root}
         elevation={0}
-        style={{ backgroundColor: "rgba(34, 34, 34, 0.26)" }}
+        style={{ backgroundColor: "rgba(34, 34, 34, 0.26)", ...(isNewItem ? changedItemStyle : {}) }}
       >
         <CardActionArea disabled={false}>
           <Grid container display="inline-flex" wrap="nowrap" justifyContent="space-between">

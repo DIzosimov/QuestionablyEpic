@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
 import makeStyles from "@mui/styles/makeStyles";
-import { Paper, Grid, Typography, Button, TextField, MenuItem } from "@mui/material";
+import { Paper, Grid, Typography, Button, TextField, MenuItem, Checkbox, FormControlLabel, Tooltip } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import HelpText from "../SetupAndMenus/HelpText";
 import UpgradeFinderSlider from "./Slider";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
-import { runUpgradeFinder } from "./UpgradeFinderEngine";
+import { runUpgradeFinder, reportedEquippedItems } from "./UpgradeFinderEngine";
 import { runUpgradeFinderBC } from "./UpgradeFinderEngineClassic";
 import { useHistory } from "react-router-dom";
 import { useSelector } from "react-redux";
@@ -150,8 +150,8 @@ function shortenReport(player, contentType, result, ufSettings, settings) {
 
   const socketSetting = settings.topGearAutoGem.value || false;
 
-  // Equipped items
-  const equippedItems = player.activeItems.filter((item) => item.isEquipped);
+  // Equipped items, as the run scored them - raised to 6/6 when the comparison was.
+  const equippedItems = reportedEquippedItems(player, ufSettings);
 
   const report = { id: generateReportCode(), dateCreated: date, timeCreated: timestamp, playername: player.charName, realm: player.realm, region: player.region,
                     autoGem: socketSetting, spec: player.spec, contentType: contentType, results: result.differentials, ufSettings: ufSettings,
@@ -217,6 +217,13 @@ export default function UpgradeFinderFront(props) {
   const [ufPvPRank, setUfPvPRank] = useState(() => getSessionStorageOrDefault("ufPvPRank", 0));
   const [ufCraftedLevel, setUfCraftedLevel] = useState(() => Math.min(getSessionStorageOrDefault("ufCraftedLevel", 2), 2));
   const [ufCraftedStats, setUfCraftedStats] = useState(() => getSessionStorageOrDefault("ufCraftedStats", "Crit / Haste"));
+  // Whether to measure candidates against the player's gear as it is, or as it will be once every piece is
+  // finished. Off by default: "what beats what I have on" is the question most of the time.
+  const [ufMaxCurrentGear, setUfMaxCurrentGear] = useState(() => getSessionStorageOrDefault("ufMaxCurrentGear", false));
+  // Runs the report under WoWAudit's conditions and stamps it with them. Off by default: it pins the fight to
+  // five minutes, which is not the length QE scores at, so a report run this way is for submitting rather than
+  // for comparing against anything else on the site.
+  const [ufWowAudit, setUfWowAudit] = useState(() => getSessionStorageOrDefault("ufWowAudit", false));
   const [ufItemTypes, setUfItemTypes] = useState(() => {
     const stored = getSessionStorageOrDefault("ufItemTypes", itemTypeOptions);
     if (!Array.isArray(stored) || stored.length === 0) {
@@ -232,7 +239,9 @@ export default function UpgradeFinderFront(props) {
       pvp: ufPvPRank,
       craftedLevel: ufCraftedLevel,
       craftedStats: ufCraftedStats,
-      itemTypes: ufItemTypes
+      itemTypes: ufItemTypes,
+      maxCurrentGear: ufMaxCurrentGear,
+      wowAudit: ufWowAudit,
   };
 
   useEffect(() => {
@@ -254,6 +263,14 @@ export default function UpgradeFinderFront(props) {
   useEffect(() => {
     setSessionStorage("ufCraftedStats", ufCraftedStats);
   }, [ufCraftedStats]);
+
+  useEffect(() => {
+    setSessionStorage("ufMaxCurrentGear", ufMaxCurrentGear);
+  }, [ufMaxCurrentGear]);
+
+  useEffect(() => {
+    setSessionStorage("ufWowAudit", ufWowAudit);
+  }, [ufWowAudit]);
 
   useEffect(() => {
     setSessionStorage("ufItemTypes", ufItemTypes);
@@ -704,6 +721,34 @@ export default function UpgradeFinderFront(props) {
             padding: 8,
           }}
         >
+          <Tooltip placement="top" title={
+            <Typography variant="caption">
+              {"Puts both sides of the comparison at the top of their track: your equipped gear is raised to 6/6, "}
+              {"and candidates are offered only at 6/6 rather than at the level they drop at. Without it the "}
+              {"numbers measure the crests you haven't spent as much as the piece itself - a 1/6 drop against "}
+              {"finished gear, or finished gear against a 1/6 drop - which is the skew WoWAudit rejects."}
+            </Typography>
+          }>
+            <FormControlLabel
+              control={<Checkbox size="small" checked={ufMaxCurrentGear || ufWowAudit} disabled={ufWowAudit}
+                                 onChange={(e) => setUfMaxCurrentGear(e.target.checked)} />}
+              label={<Typography variant="body2">Compare everything fully upgraded (6/6)</Typography>}
+            />
+          </Tooltip>
+          <Tooltip placement="top" title={
+            <Typography variant="caption">
+              {"Runs the report under the conditions WoWAudit requires - Patchwerk, a five minute fight, one "}
+              {"boss, no Power Infusion, no vault sockets, and both sides of the comparison fully upgraded - and "}
+              {"lists them on the report so they can be checked. QE scores a raid at 6:40 by default, so the "}
+              {"numbers in a report run this way are not comparable to one run without it."}
+            </Typography>
+          }>
+            <FormControlLabel
+              control={<Checkbox size="small" checked={ufWowAudit}
+                                 onChange={(e) => setUfWowAudit(e.target.checked)} />}
+              label={<Typography variant="body2">Run under WoWAudit conditions</Typography>}
+            />
+          </Tooltip>
           <div>
             <Button variant="contained" color="primary" align="center" style={{ height: "68%", width: "180px" }} disabled={!getUpgradeFinderReady(player)} onClick={unleashUpgradeFinder}>
               {t("TopGear.GoMsg")}

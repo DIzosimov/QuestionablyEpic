@@ -102,29 +102,199 @@ export function buildNewWepCombosUF(player, itemList) {
 
 
 // PlayerSettings = Upgrade Finder Settings
+/**
+ * The settings every Upgrade Finder evaluation runs under.
+ *
+ * Two departures from whatever Top Gear is set to:
+ *
+ * Gear is measured as it actually is - the player's own gems, enchants and Folio runes - rather than against a
+ * re-gemmed ideal, so the percentage answers "how much better would this item make me" rather than "how much
+ * better would this item and a full re-gem make me". The candidate item itself has none of those, so it's gemmed
+ * and enchanted automatically like any new drop would be.
+ *
+ * And the gem and enchant expansion is off. This runs a full evaluation per candidate item, hundreds of times, on
+ * the thread drawing the page - searching combinations per candidate would cost millions of evaluations for an
+ * estimate that's meant to be rough. It also keeps the comparison honest: item A only tells you something about
+ * item B if both were gemmed the same way, and a per candidate search can hand one of them a better loadout for
+ * reasons that have nothing to do with the item.
+ */
+export function upgradeFinderGearSettings(userSettings) {
+  const off = (setting) => ({ ...(userSettings[setting] || {}), value: false });
+
+  return {
+    ...userSettings,
+    forceTier: { value: "S2" },
+    replaceExistingGems: off("replaceExistingGems"),
+    detailedGearOptions: off("detailedGearOptions"),
+    optimizeAllGearOptions: off("optimizeAllGearOptions"),
+    // Run without a flask, whatever Top Gear is set to. The consumable search is already off above (it lives
+    // behind the detailed options), so this single choice is the only flask left to switch off.
+    flaskChoice: { ...(userSettings.flaskChoice || {}), value: "None" },
+  };
+}
+
+/**
+ * The player's gear as if every piece were already at the top of its own upgrade track.
+ *
+ * Upgrade Finder measures a candidate against what the player has on, so a partly upgraded set flatters
+ * everything it compares against it: a piece that only wins because the gear beside it is three ranks short isn't
+ * an upgrade, it's a reminder to spend crests. Raising the baseline answers the other question - what is still
+ * worth chasing once the crests are spent.
+ *
+ * Copies, so the player's own gear is untouched. A piece with no track is left alone: crafted items this season
+ * carry no track at all, and there is nothing to raise them to.
+ */
+export function atTopOfTrack(items) {
+  return (items || []).map((item) => {
+    const cap = CONSTANTS.itemLevelCaps[item.upgradeTrack];
+    if (!cap || item.level >= cap) return item;
+
+    const raised = item.clone();
+    raised.updateLevel(cap, item.missiveStats);
+    // clone() drops this, since two items can't both be equipped - but these stand in for the equipped set.
+    raised.isEquipped = item.isEquipped;
+    return raised;
+  });
+}
+
+/**
+ * The gear every candidate is measured against.
+ *
+ * Raising it is the player's call: it changes the question from "what beats my gear as it is" to "what beats my
+ * gear once it's finished". Its own function so the choice itself is testable, rather than only the raising.
+ */
+export function upgradeFinderBaseline(player, ufSettings) {
+  const equipped = player.getEquippedItems(true);
+  return (ufSettings || {}).maxCurrentGear ? atTopOfTrack(equipped) : equipped;
+}
+
+/* ------------------------------------------------------------------------------------------------
+   WoWAudit compliance.
+
+   WoWAudit will only take a report generated under a fixed set of conditions, so that every player's
+   numbers mean the same thing. Most of them the Upgrade Finder already meets and could never not
+   meet - there is no AoE model to turn off, no Power Infusion modelled at all, candidates are never
+   given a socket, and each one is measured on its own against the baseline. Two are choices:
+   the gear has to be fully upgraded on both sides, and the fight has to be five minutes.
+
+   Rather than ask the player to set those separately and get one of them wrong, the toggle sets both
+   and stamps the finished report with what it was run under, so the conditions can be checked
+   against WoWAudit's list without taking anyone's word for it.
+------------------------------------------------------------------------------------------------ */
+
+// Five minutes, in seconds. QE's own default is 400s for a raid, which is not the same report.
+export const WOWAUDIT_FIGHT_LENGTH = 300;
+
+/**
+ * The conditions the report was run under, in WoWAudit's own terms.
+ *
+ * Two of these the toggle enforces; the rest hold because the engine has no way to do otherwise, and
+ * are listed so the report can be checked at a glance rather than trusted.
+ */
+export function reportConditions(ufSettings) {
+  if (!(ufSettings || {}).wowAudit) return [];
+
+  return [
+    { condition: "Fight style", value: "Patchwerk", enforced: false },
+    { condition: "Fight length", value: "5 minutes", enforced: true },
+    { condition: "Targets", value: "1 boss", enforced: false },
+    { condition: "Power Infusion", value: "Not applied", enforced: false },
+    { condition: "Vault sockets", value: "None granted", enforced: false },
+    { condition: "Equipped gear", value: "Upgraded to the top of its track", enforced: true },
+    { condition: "Candidates", value: "6/6 only", enforced: true },
+  ];
+}
+
+/**
+ * WoWAudit needs both sides of the comparison fully upgraded, so the toggle turns that on rather than
+ * leaving it to be forgotten. Settings are returned unchanged when it is off, including the older saved
+ * sessions that have no such setting at all.
+ */
+export function wowAuditSettings(ufSettings) {
+  if (!(ufSettings || {}).wowAudit) return ufSettings;
+  return { ...ufSettings, maxCurrentGear: true };
+}
+
+/**
+ * The fight length this report has to be scored at, or 0 to leave the character's own model alone.
+ *
+ * Its own function so the decision is testable rather than an inline condition at the one call site.
+ */
+export function reportFightLength(ufSettings) {
+  return (ufSettings || {}).wowAudit ? WOWAUDIT_FIGHT_LENGTH : 0;
+}
+
+/**
+ * Runs `run` with the cast model's fight length pinned, and puts it back afterwards.
+ *
+ * The model is the player's own, shared with the rest of the app, and fight length reaches the scoring
+ * code by two routes - `castModel.fightInfo.fightLength` for trinkets and embellishments, and
+ * `player.getFightLength()`, which reads the same object. Setting it here covers both. Restoring it in
+ * a `finally` matters: a run that throws must not leave the character scoring at five minutes
+ * everywhere else in the app.
+ *
+ * Dungeon content is the exception - `Player.getFightLength` returns a hardcoded 200s there and never
+ * consults the model, so a dungeon report cannot be pinned. WoWAudit asks for a raid report.
+ */
+export function withFightLength(castModel, seconds, run) {
+  if (!seconds || !castModel || !castModel.fightInfo) return run();
+
+  const previous = castModel.fightInfo.fightLength;
+  castModel.fightInfo.fightLength = seconds;
+  try {
+    return run();
+  } finally {
+    castModel.fightInfo.fightLength = previous;
+  }
+}
+
+/**
+ * The equipped gear the finished report declares.
+ *
+ * It has to be the gear the run was actually scored against, not the gear sitting on the character. With the
+ * comparison raised to 6/6 those are different things - `atTopOfTrack` works on copies, deliberately, so the
+ * player's own items are left alone - and a report that scores at 6/6 while declaring gear at 1/6 contradicts
+ * itself. WoWAudit reads this list to check the report was run with everything upgraded, and rejects it on
+ * exactly that mismatch.
+ */
+export function reportedEquippedItems(player, ufSettings) {
+  const equipped = (player.activeItems || []).filter((item) => item.isEquipped);
+  return (wowAuditSettings(ufSettings) || {}).maxCurrentGear ? atTopOfTrack(equipped) : equipped;
+}
+
 export function runUpgradeFinder(player, contentType, currentLanguage, playerSettings, userSettings) {
   // TEMP VARIABLES
   const completedItemList = [];
 
+  // A WoWAudit report has conditions of its own, and one of them is a setting the player would otherwise
+  // have to remember to tick separately.
+  const ufSettings = wowAuditSettings(playerSettings);
 
   // console.log("Running Upgrade Finder. Strap in.");
-  const baseItemList = player.getEquippedItems(true);
+  const baseItemList = upgradeFinderBaseline(player, ufSettings);
   //const wepList = buildWepCombosUF(player, baseItemList);
   const wepList = buildNewWepCombosUF(player, baseItemList);
   const castModel = player.getActiveModel(contentType);
 
-  const moddedSettings = {...userSettings, forceTier: {value: "S2"}};
+  const moddedSettings = upgradeFinderGearSettings(userSettings);
 
   const baseHPS = player.getHPS(contentType);
   //userSettings.dominationSockets = "Upgrade Finder";
-  const baseSet = runTopGear(baseItemList, wepList, player, contentType, baseHPS, moddedSettings, castModel);
-  const baseScore = baseSet.itemSet.hardScore;
 
-  const itemPoss = buildItemPossibilities(player, contentType, playerSettings, userSettings);
+  // Every score in the report - the baseline and each candidate - has to be taken at the same fight length,
+  // so the whole loop runs inside the pin rather than each evaluation setting it for itself.
+  const itemPoss = withFightLength(castModel, reportFightLength(ufSettings), () => {
+    const baseSet = runTopGear(baseItemList, wepList, player, contentType, baseHPS, moddedSettings, castModel);
+    const baseScore = baseSet.itemSet.hardScore;
 
-  for (var x = 0; x < itemPoss.length; x++) {
-    completedItemList.push(processItem(itemPoss[x], baseItemList, baseScore, player, contentType, baseHPS, currentLanguage, moddedSettings, castModel));
-  }
+    const candidates = buildItemPossibilities(player, contentType, ufSettings, userSettings);
+
+    for (var x = 0; x < candidates.length; x++) {
+      completedItemList.push(processItem(candidates[x], baseItemList, baseScore, player, contentType, baseHPS, currentLanguage, moddedSettings, castModel));
+    }
+
+    return candidates;
+  });
 
   const result = new UpgradeFinderResult(itemPoss, completedItemList, contentType);
   result.new = true;
@@ -240,6 +410,22 @@ function convertRaidDifficultyToString(raidID) {
   return raidDifficulty[raidID];
 }
 
+/**
+ * Which versions of a candidate to offer.
+ *
+ * "drop" is the piece as it lands, before a crest is spent - one rank of six. Measuring that against gear the
+ * player has finished upgrading reports the crests they haven't spent as much as the piece itself, and measuring
+ * finished gear against it is the same skew the other way round. With the comparison set to fully upgraded, only
+ * the finished versions are offered: "max" is the top of the track the piece drops on, "bonus" the top of the
+ * vault track above it - a 6/6 Hero piece and a 6/6 Myth one, which is the comparison worth making.
+ *
+ * Its own function so the wiring is testable, not just the filtering.
+ */
+export function candidateStates(available, ufSettings) {
+  if (!(ufSettings || {}).maxCurrentGear) return available;
+  return available.filter((state) => state !== "drop");
+}
+
 function buildItemPossibilities(player, contentType, playerSettings, settings) {
   let itemPoss = [];
 
@@ -256,7 +442,7 @@ function buildItemPossibilities(player, contentType, playerSettings, settings) {
 
       if (isRaid && encounter > 0) {
         // For raid items - We need to create three versions. Regular, max version (crests spent) and bonus roll (that also spends crests).
-        const raidStates = ["drop", "max", "bonus"];
+        const raidStates = candidateStates(["drop", "max", "bonus"], playerSettings);
         raidStates.forEach(raidState => {
           const itemLevel = getSetItemLevel(itemSources, playerSettings, raidState, rawItem.slot);
           const item = buildItem(player, contentType, rawItem, itemLevel, rawItem.sources[0], settings, playerSettings);
@@ -274,9 +460,9 @@ function buildItemPossibilities(player, contentType, playerSettings, settings) {
         // Edit which dungeons are in-season in the CONSTANTS file.
         if (CONSTANTS.currentDungeonIDs.includes(encounter)) {
           const keyReward = getMPlusKeyReward(playerSettings.dungeon);
-          const dungeonStates = mplusEndAndVaultSameTrack(playerSettings.dungeon)
+          const dungeonStates = candidateStates(mplusEndAndVaultSameTrack(playerSettings.dungeon)
             ? ["drop", "bonus"]
-            : ["drop", "max", "bonus"];
+            : ["drop", "max", "bonus"], playerSettings);
 
           dungeonStates.forEach((dungeonState) => {
             const itemLevel = getSetItemLevel(itemSources, playerSettings, dungeonState, rawItem.slot);
